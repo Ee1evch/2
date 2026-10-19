@@ -115,4 +115,14 @@ impl Platform for WindowsPlatform {
     fn allow_firewall(&self) -> anyhow::Result<()> {
         system::allow_firewall()
     }
+    fn fine_timer(&self, on: bool) {
+        use ::windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
+        unsafe {
+            if on {
+                timeBeginPeriod(1);
+            } else {
+                timeEndPeriod(1);
+            }
+        }
+    }
 }

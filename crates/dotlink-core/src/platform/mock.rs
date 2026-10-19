@@ -190,6 +190,10 @@ impl Platform for MockPlatform {
             .ok();
     }
 
+    fn capture(&self, on: bool) {
+        self.rec(serde_json::json!({ "capture": on }));
+    }
+
     fn downloads_dir(&self) -> PathBuf {
         self.dir.clone()
     }

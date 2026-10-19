@@ -39,6 +39,25 @@ pub enum Clip {
     Files(Vec<PathBuf>),
 }
 
+/// Перехват мыши и клавиатуры ПК для управления телефоном.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CaptureEv {
+    /// курсор упёрся в выбранный край экрана — пора уйти на телефон
+    Edge,
+    /// горячая клавиша Ctrl+Alt+→ / Ctrl+Alt+←
+    Toggle,
+    /// Esc — вернуть мышь ПК
+    Exit,
+    Move(i32, i32),
+    Button(MouseButton, bool),
+    Scroll(i32, i32),
+    Key {
+        vk: u16,
+        down: bool,
+    },
+    Text(String),
+}
+
 /// События ОС → ядро.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -46,6 +65,7 @@ pub enum Event {
     Media(Option<MediaInfo>),
     Window { title: String, app: String },
     Clipboard(Clip),
+    Capture(CaptureEv),
 }
 
 pub trait Platform: Send + Sync + 'static {
@@ -81,6 +101,12 @@ pub trait Platform: Send + Sync + 'static {
     fn allow_firewall(&self) -> anyhow::Result<()> {
         Ok(())
     }
+    /// Точный системный таймер (Windows: 1 мс) — пока курсор плавно едет.
+    fn fine_timer(&self, _on: bool) {}
+    /// Перехватывать мышь и клавиатуру ПК (события идут в `Event::Capture`), пока управляем телефоном.
+    fn capture(&self, _on: bool) {}
+    /// С какого края экрана курсор уходит на телефон: right | left | top | bottom | off.
+    fn set_edge(&self, _edge: &str) {}
     /// Журнал имитации — для e2e-тестов; у настоящей платформы его нет.
     fn debug_log(&self) -> Option<serde_json::Value> {
         None

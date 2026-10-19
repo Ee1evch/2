@@ -2,20 +2,21 @@
 
 use crate::files::{Files, Ticket};
 use crate::hub::Hub;
+use crate::motion::Motion;
 use crate::pairing::Pairing;
-use crate::platform::{Clip, Event, Platform, PowerAction};
-use crate::proto::vk;
+use crate::platform::{CaptureEv, Clip, Event, MouseButton, Platform, PowerAction};
+use crate::proto::{self, vk};
 use crate::store::{Device, Macro, MacroKind, Perms, Settings, Store};
+use crate::transport::Via;
 use crate::util::{b64url, now_ms};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 /// Возможности оболочки (окно Tauri): автозапуск и системные уведомления.
 pub trait Host: Send + Sync + 'static {
@@ -34,6 +35,12 @@ impl Host for NoHost {}
 /// Сообщение сессии от ядра.
 pub enum Out {
     Json(Value),
+    /// бинарный кадр с надёжной доставкой
+    Bin(Vec<u8>),
+    /// крупный кадр — только основным каналом (видео экрана в дашборд)
+    Bulk(Vec<u8>),
+    /// можно потерять, нельзя задержать (движения курсора на телефоне)
+    Fast(Vec<u8>),
     Perms(Perms),
     Close(&'static str),
 }
@@ -41,10 +48,19 @@ pub enum Out {
 pub struct SessionInfo {
     pub device: Option<String>,
     pub name: String,
-    pub addr: SocketAddr,
+    pub peer: String,
+    pub via: Via,
+    /// поверх канала поднят прямой WebRTC
+    pub p2p: Arc<AtomicBool>,
     pub since: u64,
     pub rtt: Arc<AtomicU32>,
-    pub tx: mpsc::UnboundedSender<Out>,
+    pub tx: mpsc::Sender<Out>,
+}
+
+/// Режим «мышь и клавиатура ПК управляют телефоном» (как Universal Control).
+#[derive(Default)]
+struct Uc {
+    device: Option<String>,
 }
 
 struct Timer {
@@ -72,11 +88,22 @@ pub struct Core {
     clip_seq: AtomicU64,
     last_clip: Mutex<Option<Clip>>,
     outbox: Mutex<HashMap<String, (PathBuf, String, u64)>>,
+    pub motion: Motion,
+    uc: Mutex<Uc>,
+    notifs: Mutex<Vec<Value>>,
+    /// изменения настроек — ретранслятор и Bluetooth перезапускаются сами
+    pub settings_tx: watch::Sender<Settings>,
 }
 
 impl Core {
     pub fn new(store: Store, platform: Arc<dyn Platform>, host: Arc<dyn Host>, admin_token: String, data_dir: Option<PathBuf>) -> Self {
+        let settings = store.read().settings.clone();
+        platform.set_edge(&settings.uc_edge);
         Self {
+            motion: Motion::start(platform.clone()),
+            uc: Mutex::new(Uc::default()),
+            notifs: Mutex::new(Vec::new()),
+            settings_tx: watch::channel(settings).0,
             store,
             hub: Hub::new(),
             platform,
@@ -110,6 +137,10 @@ impl Core {
 
     pub fn publish_all(&self) {
         self.hub.set("pc", self.pc_info());
+        self.publish_routes();
+        self.hub.set("mirror", Value::Null);
+        self.hub.set("uc", json!({ "on": false }));
+        self.hub.set("notifs", json!([]));
         self.publish_config();
         self.publish_pairing();
         self.publish_net();
@@ -135,20 +166,31 @@ impl Core {
         let o = self.pairing.current();
         let port = self.port();
         let addrs = crate::net::addrs();
-        let (id, name) = {
+        let (id, name, relay, room, bt) = {
             let c = self.store.read();
-            (c.pc_id.clone(), c.pc_name.clone())
+            (c.pc_id.clone(), c.pc_name.clone(), c.settings.relay_url.clone(), c.room.clone(), c.settings.bluetooth)
         };
         let hosts: Vec<&str> = addrs.iter().take(4).map(|a| a.ip.as_str()).collect();
         let first = hosts.first().copied().unwrap_or("127.0.0.1");
-        // открывается и системной камерой: страница пульта сама прочитает секрет из #
-        let url = format!(
-            "http://{first}:{port}/#pair={}&pc={id}&h={}&n={}",
-            b64url(&o.secret),
-            hosts.join(","),
-            percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC)
-        );
+        let enc = |s: &str| percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string();
+        // QR v2: открывается и системной камерой — страница пульта сама прочитает всё из #.
+        // Кроме секрета — все маршруты до ПК: адреса в сети, ретранслятор (для разных сетей), Bluetooth.
+        let mut url = format!("http://{first}:{port}/#v=2&pair={}&pc={id}&h={}&p={port}&n={}", b64url(&o.secret), hosts.join(","), enc(&name));
+        if !relay.is_empty() {
+            url.push_str(&format!("&r={}&rm={room}", enc(&relay)));
+        }
+        if bt {
+            url.push_str("&bt=1");
+        }
         self.hub.set("pairing", json!({ "url": url, "pin": o.pin, "expires": o.expires_ms, "hosts": hosts, "port": port }));
+    }
+
+    /// Маршруты до ПК для сопряжённых телефонов: если сеть сменится, телефон найдёт ПК другим путём.
+    pub fn publish_routes(&self) {
+        let c = self.store.read();
+        let relay = (!c.settings.relay_url.is_empty()).then(|| json!({ "url": c.settings.relay_url, "room": c.room }));
+        let lan: Vec<String> = crate::net::addrs().into_iter().map(|a| a.ip).collect();
+        self.hub.set("routes", json!({ "lan": lan, "port": self.port(), "relay": relay, "ice": c.settings.ice_servers, "bt": c.settings.bluetooth }));
     }
 
     pub fn publish_net(&self) {
@@ -157,8 +199,15 @@ impl Core {
     }
 
     pub fn publish_devices(&self) {
-        let online: HashMap<String, (String, u32)> =
-            self.sessions.lock().values().filter_map(|s| s.device.clone().map(|d| (d, (s.addr.ip().to_string(), s.rtt.load(Ordering::Relaxed))))).collect();
+        let online: HashMap<String, Value> = self
+            .sessions
+            .lock()
+            .values()
+            .filter_map(|s| {
+                let d = s.device.clone()?;
+                Some((d, json!({ "addr": s.peer, "rtt": s.rtt.load(Ordering::Relaxed), "via": s.via, "p2p": s.p2p.load(Ordering::Relaxed) })))
+            })
+            .collect();
         let devs: Vec<Value> = self
             .store
             .read()
@@ -167,7 +216,8 @@ impl Core {
             .map(|d| {
                 let on = online.get(&d.id);
                 json!({ "id": d.id, "name": d.name, "perms": d.perms, "paired_at": d.paired_at, "last_seen": d.last_seen,
-                        "online": on.is_some(), "addr": on.map(|o| o.0.clone()), "rtt": on.map(|o| o.1) })
+                        "online": on.is_some(), "addr": on.map(|o| o["addr"].clone()), "rtt": on.map(|o| o["rtt"].clone()),
+                        "via": on.map(|o| o["via"].clone()), "p2p": on.map(|o| o["p2p"].clone()) })
             })
             .collect();
         self.hub.set("devices", Value::Array(devs));
@@ -195,6 +245,7 @@ impl Core {
                 }
             },
             Event::Window { title, app } => self.hub.set("win", json!({ "title": title, "app": app })),
+            Event::Capture(ev) => self.uc_event(ev),
             Event::Clipboard(clip) => {
                 let from_phone = matches!(&clip, Clip::Text(t) if self.clip_echo.lock().as_deref() == Some(t.as_str()));
                 *self.last_clip.lock() = Some(clip.clone());
@@ -269,12 +320,27 @@ impl Core {
         self.publish_devices();
     }
 
-    fn send_device(&self, device: &str, out: impl Fn() -> Out) -> bool {
+    pub fn send_device(&self, device: &str, out: impl Fn() -> Out) -> bool {
         let mut sent = false;
         for s in self.sessions.lock().values().filter(|s| s.device.as_deref() == Some(device)) {
-            sent |= s.tx.send(out()).is_ok();
+            sent |= s.tx.try_send(out()).is_ok();
         }
         sent
+    }
+
+    fn send_admins(&self, out: impl Fn() -> Out) {
+        for s in self.sessions.lock().values().filter(|s| s.device.is_none()) {
+            let _ = s.tx.try_send(out());
+        }
+    }
+
+    pub fn device_online(&self, device: &str) -> bool {
+        self.sessions.lock().values().any(|s| s.device.as_deref() == Some(device))
+    }
+
+    /// Последний подключившийся телефон — цель по умолчанию для трансляции и мыши ПК.
+    pub fn latest_device(&self) -> Option<String> {
+        self.sessions.lock().values().filter(|s| s.device.is_some()).max_by_key(|s| s.since).and_then(|s| s.device.clone())
     }
 
     pub fn add_device(&self, name: &str, key: &[u8; 32]) -> Device {
@@ -295,6 +361,125 @@ impl Core {
     }
 
     // ───────── действия ─────────
+
+    // ───────── экран телефона на ПК ─────────
+
+    /// Кадр видео с телефона → всем открытым дашбордам (крупные кадры — основным каналом).
+    pub fn mirror_frame(&self, device: &str, frame: Vec<u8>) {
+        let on = matches!(self.hub.get("mirror").as_deref(), Some(v) if v["device"] == device);
+        if on {
+            self.send_admins(|| Out::Bulk(frame.clone()));
+        }
+    }
+
+    pub fn mirror_state(&self, device: &str, on: bool, w: u32, h: u32, codec: &str) {
+        let name = self.store.device(device).map(|d| d.name).unwrap_or_default();
+        self.hub.set("mirror", if on { json!({ "device": device, "name": name, "w": w, "h": h, "codec": codec }) } else { Value::Null });
+    }
+
+    // ───────── уведомления и ссылки ─────────
+
+    pub fn phone_notification(&self, device: &str, app: &str, title: &str, text: &str) {
+        let name = self.store.device(device).map(|d| d.name).unwrap_or_else(|| "Телефон".into());
+        let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+        let n = json!({ "device": name, "app": cut(app, 60), "title": cut(title, 120), "text": cut(text, 400), "at": now_ms() });
+        let list = {
+            let mut l = self.notifs.lock();
+            l.insert(0, n);
+            l.truncate(30);
+            Value::Array(l.clone())
+        };
+        self.hub.set("notifs", list);
+        if self.store.read().settings.phone_notifications {
+            let head = if title.is_empty() { app.to_string() } else { format!("{app} · {title}") };
+            self.host.notify(&cut(&head, 80), &cut(text, 200));
+        }
+    }
+
+    /// Ссылка с телефона открывается на ПК — только безопасные схемы.
+    pub fn open_url_from_phone(&self, url: &str) -> anyhow::Result<()> {
+        let u = url.trim();
+        let lower = u.to_ascii_lowercase();
+        if !["http://", "https://", "mailto:", "tel:"].iter().any(|p| lower.starts_with(p)) || u.len() > 4096 || u.chars().any(char::is_control) {
+            anyhow::bail!("открываются только ссылки http(s), mailto и tel");
+        }
+        self.platform.open(u, "")
+    }
+
+    // ───────── мышь и клавиатура ПК на телефоне ─────────
+
+    pub fn uc_start(&self, device: Option<String>) -> anyhow::Result<()> {
+        let Some(d) = device.or_else(|| self.latest_device()) else { anyhow::bail!("нет подключённого телефона") };
+        if !self.device_online(&d) {
+            anyhow::bail!("телефон не в сети");
+        }
+        self.uc.lock().device = Some(d.clone());
+        self.platform.capture(true);
+        self.send_device(&d, || Out::Json(json!({ "t": "uc", "on": true, "edge": self.store.read().settings.uc_edge })));
+        let name = self.store.device(&d).map(|x| x.name).unwrap_or_default();
+        self.hub.set("uc", json!({ "on": true, "device": d, "name": name }));
+        Ok(())
+    }
+
+    pub fn uc_stop(&self) {
+        let prev = self.uc.lock().device.take();
+        self.platform.capture(false);
+        if let Some(d) = prev {
+            self.send_device(&d, || Out::Json(json!({ "t": "uc", "on": false })));
+        }
+        self.hub.set("uc", json!({ "on": false }));
+    }
+
+    fn uc_event(&self, ev: CaptureEv) {
+        let target = self.uc.lock().device.clone();
+        match (ev, target) {
+            (CaptureEv::Edge | CaptureEv::Toggle, None) => {
+                if let Err(e) = self.uc_start(None) {
+                    tracing::debug!("мышь на телефон: {e}");
+                    self.platform.capture(false);
+                }
+            }
+            (CaptureEv::Toggle | CaptureEv::Exit, Some(_)) => self.uc_stop(),
+            (CaptureEv::Edge, Some(_)) => {}
+            (_, None) => {}
+            (CaptureEv::Move(dx, dy), Some(d)) => {
+                let c = |v: i32| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+                if !self.send_device(&d, || Out::Fast(proto::uc_move(c(dx), c(dy)))) && !self.device_online(&d) {
+                    self.uc_stop();
+                }
+            }
+            (CaptureEv::Button(b, down), Some(d)) => {
+                let b = match b {
+                    MouseButton::Left => 0,
+                    MouseButton::Right => 1,
+                    MouseButton::Middle => 2,
+                    MouseButton::X1 => 3,
+                    MouseButton::X2 => 4,
+                };
+                self.send_device(&d, || Out::Bin(proto::uc_button(b, down)));
+            }
+            (CaptureEv::Scroll(v, h), Some(d)) => {
+                let c = |x: i32| x.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+                self.send_device(&d, || Out::Bin(proto::uc_scroll(c(v), c(h))));
+            }
+            (CaptureEv::Key { vk, down }, Some(d)) => {
+                self.send_device(&d, || Out::Json(json!({ "t": "uc-key", "vk": vk, "down": down })));
+            }
+            (CaptureEv::Text(t), Some(d)) => {
+                self.send_device(&d, || Out::Json(json!({ "t": "uc-text", "text": t })));
+            }
+        }
+    }
+
+    /// Команда телефону от дашборда: жесты, кнопки «Назад/Домой», текст, трансляция.
+    fn to_phone(&self, v: &Value, msg: Value) -> Result<(), String> {
+        let d = v["device"].as_str().map(String::from).or_else(|| self.latest_device()).ok_or("нет подключённого телефона")?;
+        if self.send_device(&d, || Out::Json(msg.clone())) {
+            Ok(())
+        } else {
+            Err("телефон не в сети".into())
+        }
+    }
 
     pub fn set_volume_from(&self, level: f32, seq: u16) {
         self.vol_seq.store(seq, Ordering::Relaxed);
@@ -444,9 +629,13 @@ impl Core {
             "settings-save" => match serde_json::from_value::<Settings>(v["settings"].clone()) {
                 Ok(s) => {
                     let auto = s.autostart;
+                    self.platform.set_edge(&s.uc_edge);
+                    let _ = self.settings_tx.send(s.clone());
                     self.store.update(|c| c.settings = s);
                     let r = self.host.set_autostart(auto);
                     self.publish_config();
+                    self.publish_routes();
+                    self.publish_pairing();
                     match r {
                         Ok(()) => ok("Настройки сохранены"),
                         Err(e) => err(format!("автозапуск: {e}")),
@@ -501,6 +690,45 @@ impl Core {
             }
             "timer-cancel" => {
                 self.cancel_timer();
+                ok("")
+            }
+            "mirror-start" | "mirror-stop" | "mirror-key" => {
+                let msg = json!({ "t": "mirror-req", "on": t != "mirror-stop", "key": t == "mirror-key", "bitrate": v["bitrate"], "max": v["max"] });
+                match self.to_phone(v, msg) {
+                    Ok(()) => ok(if t == "mirror-start" { "Запрос отправлен — подтвердите трансляцию на телефоне" } else { "" }),
+                    Err(e) => err(e),
+                }
+            }
+            // жест или кнопка на экране телефона: tap, long, swipe, scroll, back, home, recents, notifications, text, key
+            "phone-ctl" => match self.to_phone(v, json!({ "t": "ctl", "a": v["a"], "x": v["x"], "y": v["y"], "x2": v["x2"], "y2": v["y2"], "ms": v["ms"], "path": v["path"], "text": v["text"], "key": v["key"] })) {
+                Ok(()) => json!({ "t": "ok", "for": t }),
+                Err(e) => err(e),
+            },
+            "phone-open-url" => {
+                let url = v["url"].as_str().unwrap_or("").trim().to_string();
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return err("нужна ссылка http(s)".into());
+                }
+                match self.to_phone(v, json!({ "t": "open-url", "url": url })) {
+                    Ok(()) => ok("Открыто на телефоне"),
+                    Err(e) => err(e),
+                }
+            }
+            "phone-text" => match self.to_phone(v, json!({ "t": "clip-push", "text": v["text"] })) {
+                Ok(()) => ok("Текст на телефоне"),
+                Err(e) => err(e),
+            },
+            "uc-start" => match self.uc_start(v["device"].as_str().map(String::from)) {
+                Ok(()) => ok("Мышь и клавиатура ПК — на телефоне. Вернуться: Esc или Ctrl+Alt+←"),
+                Err(e) => err(e.to_string()),
+            },
+            "uc-stop" => {
+                self.uc_stop();
+                ok("")
+            }
+            "notifs-clear" => {
+                self.notifs.lock().clear();
+                self.hub.set("notifs", json!([]));
                 ok("")
             }
             _ => err(format!("неизвестная команда {t}")),

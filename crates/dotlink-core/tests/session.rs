@@ -62,7 +62,11 @@ async fn pair_control_reconnect_and_revoke() {
     let url = format!("ws://{}/ws", run.addr);
     let pairing = run.core.hub.get("pairing").unwrap();
     let qr = pairing["url"].as_str().unwrap().to_string();
-    let secret = unb64(qr.split("#pair=").nth(1).unwrap().split('&').next().unwrap()).unwrap();
+    let hash = qr.split('#').nth(1).unwrap();
+    let param = |k: &str| hash.split('&').find_map(|kv| kv.strip_prefix(k).and_then(|v| v.strip_prefix('='))).map(str::to_string);
+    assert_eq!(param("v").as_deref(), Some("2"));
+    assert!(param("pc").is_some() && param("h").is_some());
+    let secret = unb64(&param("pair").unwrap()).unwrap();
 
     // ── сопряжение по QR ──
     let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();

@@ -71,12 +71,42 @@ pub struct Settings {
     pub clip_sync: bool,
     /// уведомлять на ПК о подключении устройств и принятых файлах
     pub notify: bool,
+    /// показывать на ПК уведомления телефона
+    pub phone_notifications: bool,
     pub port: u16,
+    /// ретранслятор для связи из разных сетей, например `wss://relay.example.com` (пусто — выключен)
+    pub relay_url: String,
+    /// STUN/TURN для прямого канала WebRTC
+    pub ice_servers: Vec<IceServer>,
+    /// с какого края экрана курсор ПК уходит на телефон: right | left | top | bottom | off
+    pub uc_edge: String,
+    /// Bluetooth RFCOMM: телефон подключается без Wi-Fi и интернета
+    pub bluetooth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct IceServer {
+    pub urls: Vec<String>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub username: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub credential: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { autostart: true, clip_sync: true, notify: true, port: 47800 }
+        Self {
+            autostart: true,
+            clip_sync: true,
+            notify: true,
+            phone_notifications: true,
+            port: 47800,
+            relay_url: String::new(),
+            ice_servers: vec![IceServer { urls: vec!["stun:stun.l.google.com:19302".into(), "stun:stun.cloudflare.com:3478".into()], ..Default::default() }],
+            uc_edge: "right".into(),
+            bluetooth: true,
+        }
     }
 }
 
@@ -85,6 +115,10 @@ impl Default for Settings {
 pub struct Config {
     pub pc_id: String,
     pub pc_name: String,
+    /// комната на ретрансляторе: телефон и ПК встречаются в ней (неугадываемый id)
+    pub room: String,
+    /// доказательство, что комнатой владеет этот ПК (ретранслятор видит только хэш)
+    pub room_secret: String,
     pub devices: Vec<Device>,
     pub macros: Vec<Macro>,
     pub settings: Settings,
@@ -95,6 +129,8 @@ impl Default for Config {
         Self {
             pc_id: crate::util::b64url(&crate::crypto::random::<9>()),
             pc_name: crate::util::hostname(),
+            room: crate::util::b64url(&crate::crypto::random::<16>()),
+            room_secret: crate::util::b64url(&crate::crypto::random::<24>()),
             devices: vec![],
             macros: default_macros(),
             settings: Settings::default(),

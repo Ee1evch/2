@@ -5,13 +5,16 @@ pub mod crypto;
 pub mod discovery;
 pub mod files;
 pub mod hub;
+pub mod motion;
 pub mod net;
 pub mod pairing;
 pub mod platform;
 pub mod proto;
+pub mod rtc;
 pub mod server;
 pub mod session;
 pub mod store;
+pub mod transport;
 pub mod util;
 
 pub use crate::core::{Core, Host, NoHost};
@@ -120,6 +123,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
                 t.tick().await;
                 core.publish_net();
                 core.publish_pairing();
+                core.publish_routes();
             }
         });
     }

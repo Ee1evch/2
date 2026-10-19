@@ -59,7 +59,10 @@ async fn guard(ConnectInfo(addr): ConnectInfo<SocketAddr>, req: Request, next: N
 }
 
 async fn ws(ws: WebSocketUpgrade, ConnectInfo(addr): ConnectInfo<SocketAddr>, State(core): State<Arc<Core>>) -> Response {
-    ws.max_message_size(2 << 20).on_upgrade(move |s| crate::session::run(core, s, addr))
+    ws.max_message_size(4 << 20).on_upgrade(move |s| {
+        let wire = crate::transport::from_axum(s, crate::transport::Via::Lan, addr.to_string(), addr.ip().is_loopback());
+        crate::session::run(core, wire)
+    })
 }
 
 async fn info(State(core): State<Arc<Core>>) -> Json<serde_json::Value> {

@@ -25,6 +25,19 @@ pub mod op {
     pub const VOLUME: u8 = 0x07;
     /// u32 метка времени клиента; сервер отвечает тем же кадром
     pub const PING: u8 = 0x08;
+    /// i16 dx, i16 dy (четверти пикселя), u32 время касания на телефоне в мс —
+    /// ПК воспроизводит движение в том же ритме, без рывков от пачек пакетов Wi-Fi
+    pub const MOVE_T: u8 = 0x09;
+    /// кадр видео экрана телефона: u8 флаги (1 ключевой, 2 конфигурация), u32 время в мс, u16 w, u16 h, данные H.264/VP8
+    pub const MIRROR: u8 = 0x0A;
+
+    // ПК → телефон: мышь ПК управляет телефоном (как Universal Control)
+    /// i16 dx, i16 dy — в пикселях ПК
+    pub const UC_MOVE: u8 = 0x20;
+    /// u8 кнопка, u8 действие (0 отпустить, 1 нажать)
+    pub const UC_BUTTON: u8 = 0x21;
+    /// i16 v, i16 h — единицы колеса
+    pub const UC_SCROLL: u8 = 0x22;
     pub const JSON: u8 = b'{';
 }
 
@@ -54,14 +67,36 @@ pub enum KeyAction {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
-    Move { dx: i16, dy: i16 },
-    Scroll { v: i16, h: i16 },
-    Button { button: MouseButton, action: ButtonAction },
-    Key { vk: u16, action: KeyAction },
+    Move {
+        dx: i16,
+        dy: i16,
+    },
+    Scroll {
+        v: i16,
+        h: i16,
+    },
+    Button {
+        button: MouseButton,
+        action: ButtonAction,
+    },
+    Key {
+        vk: u16,
+        action: KeyAction,
+    },
     Text(String),
     Chord(Vec<u16>),
-    Volume { level: u16, seq: u16 },
+    Volume {
+        level: u16,
+        seq: u16,
+    },
     Ping(u32),
+    MoveT {
+        dx: i16,
+        dy: i16,
+        t: u32,
+    },
+    /// весь кадр как есть — ядро пересылает его дашборду
+    Mirror(Vec<u8>),
     Json(serde_json::Value),
 }
 
@@ -117,9 +152,29 @@ pub fn decode(b: &[u8]) -> Result<Frame, BadFrame> {
         }
         op::VOLUME => Frame::Volume { level: u16_at(b, 1)?.min(10_000), seq: u16_at(b, 3)? },
         op::PING => Frame::Ping(u32::from_le_bytes(b.get(1..5).ok_or(BadFrame)?.try_into().unwrap())),
+        op::MOVE_T => Frame::MoveT { dx: i16_at(b, 1)?, dy: i16_at(b, 3)?, t: u32::from_le_bytes(b.get(5..9).ok_or(BadFrame)?.try_into().unwrap()) },
+        op::MIRROR if b.len() > 10 => Frame::Mirror(b.to_vec()),
         op::JSON => Frame::Json(serde_json::from_slice(b).map_err(|_| BadFrame)?),
         _ => return Err(BadFrame),
     })
+}
+
+pub fn uc_move(dx: i16, dy: i16) -> Vec<u8> {
+    let mut v = vec![op::UC_MOVE];
+    v.extend_from_slice(&dx.to_le_bytes());
+    v.extend_from_slice(&dy.to_le_bytes());
+    v
+}
+
+pub fn uc_button(button: u8, down: bool) -> Vec<u8> {
+    vec![op::UC_BUTTON, button, down as u8]
+}
+
+pub fn uc_scroll(v: i16, h: i16) -> Vec<u8> {
+    let mut b = vec![op::UC_SCROLL];
+    b.extend_from_slice(&v.to_le_bytes());
+    b.extend_from_slice(&h.to_le_bytes());
+    b
 }
 
 pub fn pong(t: u32) -> Vec<u8> {
@@ -182,6 +237,37 @@ pub enum RemoteCmd {
         size: Option<u64>,
     },
     ClipFiles,
+    /// открыть ссылку на ПК (Handoff с телефона)
+    OpenUrl {
+        url: String,
+    },
+    /// уведомление с телефона — показать на ПК
+    Notify {
+        app: String,
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        text: String,
+    },
+    /// трансляция экрана началась или закончилась
+    Mirror {
+        on: bool,
+        #[serde(default)]
+        w: u32,
+        #[serde(default)]
+        h: u32,
+        #[serde(default)]
+        codec: String,
+    },
+    /// курсор ПК ушёл с края экрана телефона — вернуть управление ПК
+    UcExit,
+    /// WebRTC: предложение и кандидаты — внутри уже зашифрованной сессии
+    RtcOffer {
+        sdp: serde_json::Value,
+    },
+    RtcIce {
+        candidate: serde_json::Value,
+    },
 }
 
 /// Виртуальные коды клавиш Windows — общее пространство имён протокола.
@@ -264,6 +350,9 @@ mod tests {
         t.extend_from_slice("Привет".as_bytes());
         assert_eq!(decode(&t).unwrap(), Frame::Text("Привет".into()));
         assert!(matches!(decode(br#"{"t":"media","a":"next"}"#).unwrap(), Frame::Json(_)));
+        assert_eq!(decode(&[9, 4, 0, 0xFC, 0xFF, 0x10, 0, 0, 0]).unwrap(), Frame::MoveT { dx: 4, dy: -4, t: 16 });
+        assert!(matches!(decode(&[0x0A, 1, 0, 0, 0, 0, 0x80, 2, 0x38, 4, 0xAA]).unwrap(), Frame::Mirror(_)));
+        assert!(decode(&[0x0A, 1]).is_err());
     }
 
     #[test]

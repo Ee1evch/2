@@ -1,66 +1,131 @@
-//! Сессия WebSocket: вход (сопряжение или вызов-ответ), затем ввод → ОС и состояние → телефон.
-//! Ввод обрабатывается прямо в задаче сессии: расшифровка + SendInput занимают микросекунды.
+//! Сессия: вход (сопряжение или вызов-ответ), затем ввод → ОС и состояние → телефон.
+//!
+//! Один и тот же код обслуживает любой канал (`Wire`): WebSocket в локальной сети, трубу через
+//! ретранслятор, Bluetooth. Поверх него телефон может поднять прямой канал WebRTC — сигналинг идёт
+//! внутри этой же зашифрованной сессии, после чего команды идут по «ctl», а движения — по «fast» (как UDP).
 
 use crate::core::{Core, Out, SessionInfo};
-use crate::crypto::{self, Channel, PairKeys};
+use crate::crypto::{self, Channel, PairKeys, LABEL_RTC_CTL, LABEL_RTC_FAST};
 use crate::hub::ADMIN_ONLY;
 use crate::pairing::Kind;
 use crate::proto::{self, Frame, RemoteCmd};
+use crate::rtc::{self, Rtc, RtcEvent};
 use crate::store::Perms;
+use crate::transport::{Msg, Wire};
 use crate::util::{b64, unb64, unb64_arr};
-use axum::extract::ws::{Message, WebSocket};
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 
-enum Role {
-    Admin,
-    Remote { device: String, name: String, perms: Perms, chan: Channel },
+struct Keys {
+    dk: [u8; 32],
+    nc: [u8; 16],
+    ns: [u8; 16],
 }
 
+#[allow(clippy::large_enum_variant)] // одна на сессию
+enum Role {
+    Admin,
+    Remote { device: String, name: String, perms: Perms, chan: Channel, keys: Keys },
+}
+
+/// Откуда пришёл кадр — ответ на пинг уходит тем же путём, чтобы задержка была честной.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Path {
+    Wire,
+    Ctl,
+    Fast,
+}
+
+/// Отправка: основной канал или WebRTC, с шифрованием телефона (у дашборда — без).
 struct Tx {
-    sink: SplitSink<WebSocket, Message>,
+    wire: mpsc::Sender<Msg>,
     chan: Option<Channel>,
+    rtc: Option<Arc<Rtc>>,
+    rtc_ctl: Option<Channel>,
+    rtc_fast: Option<Channel>,
+    rtc_open: bool,
 }
 
 impl Tx {
-    async fn json(&mut self, v: &Value) -> Result<(), axum::Error> {
-        let bytes = serde_json::to_vec(v).unwrap_or_default();
-        match &mut self.chan {
-            Some(c) => self.sink.send(Message::Binary(c.seal(&bytes).into())).await,
-            None => self.sink.send(Message::Text(String::from_utf8(bytes).unwrap_or_default().into())).await,
+    async fn wire_bin(&mut self, plain: &[u8]) -> bool {
+        let data = match &mut self.chan {
+            Some(c) => c.seal(plain),
+            None => plain.to_vec(),
+        };
+        self.wire.send(Msg::Bin(data)).await.is_ok()
+    }
+
+    /// Надёжная доставка: по WebRTC «ctl», если он открыт и кадр небольшой, иначе основным каналом.
+    async fn reliable(&mut self, plain: &[u8]) -> bool {
+        if self.rtc_open && plain.len() + 32 <= rtc::MAX_DC_MESSAGE {
+            if let (Some(rtc), Some(c)) = (self.rtc.clone(), self.rtc_ctl.as_mut()) {
+                if rtc.send(rtc::Kind::Ctl, &c.seal(plain)).await {
+                    return true;
+                }
+            }
+        }
+        self.wire_bin(plain).await
+    }
+
+    /// Можно потерять, нельзя задержать: движения курсора на телефоне.
+    async fn fast(&mut self, plain: &[u8]) -> bool {
+        if self.rtc_open {
+            if let (Some(rtc), Some(c)) = (self.rtc.clone(), self.rtc_fast.as_mut()) {
+                if rtc.send(rtc::Kind::Fast, &c.seal(plain)).await {
+                    return true;
+                }
+            }
+        }
+        let data = match &mut self.chan {
+            Some(c) => c.seal(plain),
+            None => plain.to_vec(),
+        };
+        // очередь основного канала полна — кадр движения не стоит ожидания
+        !matches!(self.wire.try_send(Msg::Bin(data)), Err(mpsc::error::TrySendError::Closed(_)))
+    }
+
+    async fn reply(&mut self, path: Path, plain: &[u8]) -> bool {
+        match path {
+            Path::Fast => self.fast(plain).await,
+            Path::Ctl => self.reliable(plain).await,
+            Path::Wire => self.wire_bin(plain).await,
         }
     }
-    async fn bin(&mut self, b: &[u8]) -> Result<(), axum::Error> {
-        let data = match &mut self.chan {
-            Some(c) => c.seal(b),
-            None => b.to_vec(),
-        };
-        self.sink.send(Message::Binary(data.into())).await
+
+    async fn json(&mut self, v: &Value) -> bool {
+        let bytes = serde_json::to_vec(v).unwrap_or_default();
+        if self.chan.is_none() {
+            return self.wire.send(Msg::Text(String::from_utf8(bytes).unwrap_or_default())).await.is_ok();
+        }
+        self.reliable(&bytes).await
+    }
+
+    /// Только основным каналом: сигналинг WebRTC и крупные кадры.
+    async fn json_wire(&mut self, v: &Value) -> bool {
+        let bytes = serde_json::to_vec(v).unwrap_or_default();
+        if self.chan.is_none() {
+            return self.wire.send(Msg::Text(String::from_utf8(bytes).unwrap_or_default())).await.is_ok();
+        }
+        self.wire_bin(&bytes).await
     }
 }
 
-async fn recv_json(stream: &mut SplitStream<WebSocket>) -> Option<Value> {
-    loop {
-        match stream.next().await? {
-            Ok(Message::Text(t)) => return serde_json::from_str(t.as_str()).ok(),
-            Ok(Message::Ping(_) | Message::Pong(_)) => continue,
-            _ => return None,
-        }
+async fn recv_json(rx: &mut mpsc::Receiver<Msg>) -> Option<Value> {
+    match rx.recv().await? {
+        Msg::Text(t) => serde_json::from_str(&t).ok(),
+        Msg::Bin(_) => None,
     }
 }
 
 async fn fail(tx: &mut Tx, code: &str) -> Option<Role> {
-    let _ = tx.json(&json!({ "t": "error", "code": code })).await;
+    tx.json(&json!({ "t": "error", "code": code })).await;
     None
 }
 
-async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut SplitStream<WebSocket>, addr: SocketAddr) -> Option<Role> {
+async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut mpsc::Receiver<Msg>, loopback: bool) -> Option<Role> {
     let hello = recv_json(rx).await?;
     if hello["t"] != "hello" {
         return fail(tx, "protocol").await;
@@ -68,15 +133,15 @@ async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut SplitStream<WebSocket
     let pc = core.pc_info();
     if hello["role"] == "admin" {
         let token = hello["token"].as_str().unwrap_or("");
-        if !addr.ip().is_loopback() || !crypto::ct_eq(token.as_bytes(), core.admin_token.as_bytes()) {
+        if !loopback || !crypto::ct_eq(token.as_bytes(), core.admin_token.as_bytes()) {
             return fail(tx, "forbidden").await;
         }
-        tx.json(&json!({ "t": "welcome", "admin": true, "pc": pc })).await.ok()?;
+        tx.json(&json!({ "t": "welcome", "admin": true, "pc": pc })).await.then_some(())?;
         return Some(Role::Admin);
     }
 
-    let Some(nonce_c) = hello["nonce"].as_str().and_then(unb64_arr::<16>) else { return fail(tx, "protocol").await };
-    let nonce_s = crypto::random::<16>();
+    let Some(nc) = hello["nonce"].as_str().and_then(unb64_arr::<16>) else { return fail(tx, "protocol").await };
+    let ns = crypto::random::<16>();
     let name: String = hello["name"].as_str().unwrap_or("Телефон").trim().chars().take(40).collect();
 
     if let Some(mode) = hello["pair"].as_str() {
@@ -87,11 +152,11 @@ async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut SplitStream<WebSocket
             return fail(tx, "expired").await;
         }
         let keys = PairKeys::generate();
-        tx.json(&json!({ "t": "pair-challenge", "pub": b64(&keys.public), "nonce": b64(&nonce_s), "pc": pc })).await.ok()?;
+        tx.json(&json!({ "t": "pair-challenge", "pub": b64(&keys.public), "nonce": b64(&ns), "pc": pc })).await.then_some(())?;
         let proof = recv_json(rx).await?;
         let mac = proof["mac"].as_str().and_then(unb64).unwrap_or_default();
         let z = keys.shared(&pub_c);
-        let t = crypto::pair_transcript(&pub_c, &keys.public, &nonce_c, &nonce_s);
+        let t = crypto::pair_transcript(&pub_c, &keys.public, &nc, &ns);
         let secret = core.pairing.candidates(kind).into_iter().find(|s| crypto::ct_eq(&crypto::pair_mac(s, b"c", &t, &z), &mac));
         let Some(secret) = secret else {
             if kind == Kind::Pin {
@@ -104,23 +169,27 @@ async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut SplitStream<WebSocket
         core.publish_pairing();
         let dk = crypto::device_key(&z, &secret, &t);
         let dev = core.add_device(if name.is_empty() { "Телефон" } else { &name }, &dk);
-        tx.json(&json!({ "t": "paired", "device": dev.id, "mac": b64(&crypto::pair_mac(&secret, b"s", &t, &z)), "pc": pc, "perms": dev.perms })).await.ok()?;
-        return Some(Role::Remote { device: dev.id, name: dev.name, perms: dev.perms, chan: Channel::new(&dk, &nonce_c, &nonce_s, true) });
+        tx.json(&json!({ "t": "paired", "device": dev.id, "mac": b64(&crypto::pair_mac(&secret, b"s", &t, &z)), "pc": pc, "perms": dev.perms }))
+            .await
+            .then_some(())?;
+        let chan = Channel::new(&dk, &nc, &ns, true);
+        return Some(Role::Remote { device: dev.id, name: dev.name, perms: dev.perms, chan, keys: Keys { dk, nc, ns } });
     }
 
     // ───── вход известного устройства ─────
     let Some(dev) = hello["device"].as_str().and_then(|id| core.store.device(id)) else { return fail(tx, "unknown-device").await };
     let Some(dk) = unb64_arr::<32>(&dev.key) else { return fail(tx, "unknown-device").await };
-    tx.json(&json!({ "t": "challenge", "nonce": b64(&nonce_s), "pc": pc })).await.ok()?;
+    tx.json(&json!({ "t": "challenge", "nonce": b64(&ns), "pc": pc })).await.then_some(())?;
     let auth = recv_json(rx).await?;
     let mac = auth["mac"].as_str().and_then(unb64).unwrap_or_default();
-    if !crypto::ct_eq(&mac, &crypto::auth_mac(&dk, b"c", &nonce_c, &nonce_s)) {
+    if !crypto::ct_eq(&mac, &crypto::auth_mac(&dk, b"c", &nc, &ns)) {
         return fail(tx, "bad-auth").await;
     }
-    tx.json(&json!({ "t": "welcome", "device": dev.id, "mac": b64(&crypto::auth_mac(&dk, b"s", &nonce_c, &nonce_s)), "pc": pc, "perms": dev.perms }))
+    tx.json(&json!({ "t": "welcome", "device": dev.id, "mac": b64(&crypto::auth_mac(&dk, b"s", &nc, &ns)), "pc": pc, "perms": dev.perms }))
         .await
-        .ok()?;
-    Some(Role::Remote { device: dev.id, name: dev.name, perms: dev.perms, chan: Channel::new(&dk, &nonce_c, &nonce_s, true) })
+        .then_some(())?;
+    let chan = Channel::new(&dk, &nc, &ns, true);
+    Some(Role::Remote { device: dev.id, name: dev.name, perms: dev.perms, chan, keys: Keys { dk, nc, ns } })
 }
 
 fn visible(key: &str, admin: bool, perms: &Perms) -> bool {
@@ -145,79 +214,106 @@ impl SubPixel {
     }
 }
 
-pub async fn run(core: Arc<Core>, ws: WebSocket, addr: SocketAddr) {
-    let (sink, mut rx) = ws.split();
-    let mut tx = Tx { sink, chan: None };
-    let role = match tokio::time::timeout(Duration::from_secs(20), handshake(&core, &mut tx, &mut rx, addr)).await {
+struct Ctx {
+    sid: u64,
+    admin: bool,
+    device: Option<String>,
+    perms: Perms,
+    keys: Option<Keys>,
+    sub: SubPixel,
+    rtt: Arc<AtomicU32>,
+    p2p: Arc<AtomicBool>,
+    last_rtt_publish: u32,
+    rtc_rx: Option<mpsc::Receiver<RtcEvent>>,
+}
+
+pub async fn run(core: Arc<Core>, wire: Wire) {
+    let Wire { tx: wire_tx, rx: mut wire_rx, via, peer, loopback } = wire;
+    let mut tx = Tx { wire: wire_tx, chan: None, rtc: None, rtc_ctl: None, rtc_fast: None, rtc_open: false };
+    let role = match tokio::time::timeout(Duration::from_secs(20), handshake(&core, &mut tx, &mut wire_rx, loopback)).await {
         Ok(Some(r)) => r,
-        _ => {
-            let _ = tx.sink.close().await;
-            return;
-        }
+        _ => return,
     };
-    let (admin, device, mut perms) = match role {
-        Role::Admin => (true, None, Perms::default()),
-        Role::Remote { device, name, perms, chan } => {
-            tracing::info!("подключено устройство «{name}» с {addr}");
+    let (admin, device, name, perms, keys) = match role {
+        Role::Admin => (true, None, String::from("Дашборд"), Perms::default(), None),
+        Role::Remote { device, name, perms, chan, keys } => {
+            tracing::info!("подключено «{name}» ({via:?}, {peer})");
             tx.chan = Some(chan);
-            (false, Some(device), perms)
+            (false, Some(device), name, perms, Some(keys))
         }
     };
 
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
+    let (out_tx, mut out_rx) = mpsc::channel::<Out>(512);
     let rtt = Arc::new(AtomicU32::new(0));
-    let sid = core.register(SessionInfo { device: device.clone(), name: String::new(), addr, since: crate::util::now_ms(), rtt: rtt.clone(), tx: out_tx });
+    let p2p = Arc::new(AtomicBool::new(false));
+    let sid = core.register(SessionInfo {
+        device: device.clone(),
+        name,
+        peer: peer.clone(),
+        via,
+        p2p: p2p.clone(),
+        since: crate::util::now_ms(),
+        rtt: rtt.clone(),
+        tx: out_tx,
+    });
 
     // подписка до снимка: ни одно изменение не потеряется
     let mut hub_rx = core.hub.subscribe();
     let mut ok = send_snapshot(&core, &mut tx, admin, &perms).await;
-    let mut sub = SubPixel::default();
-    let mut last_rtt_publish = 0u32;
+    let mut ctx = Ctx { sid, admin, device, perms, keys, sub: SubPixel::default(), rtt, p2p, last_rtt_publish: 0, rtc_rx: None };
 
     while ok {
         tokio::select! {
-            m = rx.next() => {
-                let Some(Ok(m)) = m else { break };
-                match m {
-                    Message::Binary(b) => {
+            m = wire_rx.recv() => {
+                let Some(m) = m else { break };
+                ok = match m {
+                    Msg::Bin(b) => {
                         let plain = match &mut tx.chan {
-                            Some(c) => match c.open(&b) { Some(p) => p, None => { tracing::warn!("отброшен кадр с неверной подписью от {addr}"); continue } },
-                            None => b.to_vec(),
+                            Some(c) => match c.open(&b) { Some(p) => p, None => { tracing::warn!("отброшен кадр с неверной подписью от {peer}"); continue } },
+                            None => b,
                         };
-                        let Ok(frame) = proto::decode(&plain) else { continue };
-                        ok = handle_frame(&core, &mut tx, frame, admin, device.as_deref(), &perms, &mut sub, &rtt, &mut last_rtt_publish).await;
-                    }
-                    Message::Text(t) if admin => {
-                        if let Ok(v) = serde_json::from_str::<Value>(t.as_str()) {
-                            let reply = core.admin_cmd(&v);
-                            ok = tx.json(&reply).await.is_ok();
+                        match proto::decode(&plain) {
+                            Ok(f) => handle_frame(&core, &mut tx, &mut ctx, f, Path::Wire).await,
+                            Err(_) => true,
                         }
                     }
-                    Message::Close(_) => break,
-                    _ => {}
-                }
+                    Msg::Text(t) if ctx.admin => match serde_json::from_str::<Value>(&t) {
+                        Ok(v) => { let reply = core.admin_cmd(&v); tx.json(&reply).await }
+                        Err(_) => true,
+                    },
+                    Msg::Text(_) => true,
+                };
+            }
+            e = async { match ctx.rtc_rx.as_mut() { Some(r) => r.recv().await, None => std::future::pending().await } } => {
+                ok = handle_rtc(&core, &mut tx, &mut ctx, e).await;
             }
             u = hub_rx.recv() => match u {
-                Ok((k, v)) => if visible(k, admin, &perms) {
-                    ok = tx.json(&json!({ "t": "state", "k": k, "v": *v })).await.is_ok();
+                Ok((k, v)) => if visible(k, ctx.admin, &ctx.perms) {
+                    ok = tx.json(&json!({ "t": "state", "k": k, "v": *v })).await;
                 },
-                Err(broadcast::error::RecvError::Lagged(_)) => ok = send_snapshot(&core, &mut tx, admin, &perms).await,
+                Err(broadcast::error::RecvError::Lagged(_)) => ok = send_snapshot(&core, &mut tx, ctx.admin, &ctx.perms).await,
                 Err(_) => break,
             },
             o = out_rx.recv() => match o {
-                Some(Out::Json(v)) => ok = tx.json(&v).await.is_ok(),
+                Some(Out::Json(v)) => ok = tx.json(&v).await,
+                Some(Out::Bin(b)) => ok = tx.reliable(&b).await,
+                Some(Out::Bulk(b)) => ok = tx.wire_bin(&b).await,
+                Some(Out::Fast(b)) => ok = tx.fast(&b).await,
                 Some(Out::Perms(p)) => {
-                    perms = p;
-                    ok = tx.json(&json!({ "t": "perms", "v": perms })).await.is_ok() && send_snapshot(&core, &mut tx, admin, &perms).await;
+                    ctx.perms = p;
+                    ok = tx.json(&json!({ "t": "perms", "v": ctx.perms })).await && send_snapshot(&core, &mut tx, ctx.admin, &ctx.perms).await;
                 }
-                Some(Out::Close(code)) => { let _ = tx.json(&json!({ "t": "error", "code": code })).await; break }
+                Some(Out::Close(code)) => { tx.json(&json!({ "t": "error", "code": code })).await; break }
                 None => break,
             },
         }
     }
-    let _ = tx.sink.close().await;
+    if let Some(r) = tx.rtc.take() {
+        r.close().await;
+    }
+    core.motion.forget(sid);
     core.unregister(sid);
-    if let Some(d) = device {
+    if let Some(d) = ctx.device {
         tracing::info!("устройство {d} отключилось");
     }
 }
@@ -225,67 +321,109 @@ pub async fn run(core: Arc<Core>, ws: WebSocket, addr: SocketAddr) {
 async fn send_snapshot(core: &Core, tx: &mut Tx, admin: bool, perms: &Perms) -> bool {
     let snap: serde_json::Map<String, Value> =
         core.hub.snapshot().into_iter().filter(|(k, _)| visible(k, admin, perms)).map(|(k, v)| (k.to_string(), (*v).clone())).collect();
-    tx.json(&json!({ "t": "snapshot", "v": snap })).await.is_ok()
+    tx.json_wire(&json!({ "t": "snapshot", "v": snap })).await
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn handle_frame(
-    core: &Arc<Core>,
-    tx: &mut Tx,
-    f: Frame,
-    admin: bool,
-    device: Option<&str>,
-    perms: &Perms,
-    sub: &mut SubPixel,
-    rtt: &AtomicU32,
-    last_pub: &mut u32,
-) -> bool {
+async fn handle_rtc(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, e: Option<RtcEvent>) -> bool {
+    match e {
+        Some(RtcEvent::Ice(c)) => tx.json_wire(&json!({ "t": "rtc-ice", "candidate": c })).await,
+        Some(RtcEvent::Open(rtc::Kind::Ctl)) => {
+            tx.rtc_open = true;
+            ctx.p2p.store(true, Ordering::Relaxed);
+            core.publish_devices();
+            tracing::info!("прямой канал WebRTC открыт");
+            true
+        }
+        Some(RtcEvent::Open(_)) => true,
+        Some(RtcEvent::Msg(kind, data)) => {
+            let ch = if kind == rtc::Kind::Ctl { tx.rtc_ctl.as_mut() } else { tx.rtc_fast.as_mut() };
+            let Some(plain) = ch.and_then(|c| c.open(&data)) else { return true };
+            match proto::decode(&plain) {
+                Ok(f) => handle_frame(core, tx, ctx, f, if kind == rtc::Kind::Ctl { Path::Ctl } else { Path::Fast }).await,
+                Err(_) => true,
+            }
+        }
+        Some(RtcEvent::Closed) | None => {
+            // прямой канал пропал — всё продолжает идти основным
+            if let Some(r) = tx.rtc.take() {
+                r.close().await;
+            }
+            tx.rtc_open = false;
+            ctx.rtc_rx = None;
+            ctx.p2p.store(false, Ordering::Relaxed);
+            core.publish_devices();
+            true
+        }
+    }
+}
+
+async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, path: Path) -> bool {
     let p = &core.platform;
     let deny = |what: &str| json!({ "t": "denied", "what": what });
     match f {
-        Frame::Ping(t) => {
-            return tx.bin(&proto::pong(t)).await.is_ok();
-        }
+        Frame::Ping(t) => return tx.reply(path, &proto::pong(t)).await,
         Frame::Json(v) if v["t"] == "rtt" => {
             // телефон сообщает измеренную задержку — показываем её в дашборде
             let ms = v["ms"].as_u64().unwrap_or(0).min(10_000) as u32;
-            rtt.store(ms, Ordering::Relaxed);
-            if ms.abs_diff(*last_pub) >= 3 {
-                *last_pub = ms;
-                core.session_rtt();
+            ctx.rtt.store(ms, Ordering::Relaxed);
+            if ms.abs_diff(ctx.last_rtt_publish) >= 3 {
+                ctx.last_rtt_publish = ms;
+                core.publish_devices();
             }
         }
-        Frame::Move { .. } | Frame::Scroll { .. } | Frame::Button { .. } | Frame::Key { .. } | Frame::Text(_) | Frame::Chord(_) if !perms.input => {
-            return tx.json(&deny("input")).await.is_ok();
+        Frame::Move { .. } | Frame::MoveT { .. } | Frame::Scroll { .. } | Frame::Button { .. } | Frame::Key { .. } | Frame::Text(_) | Frame::Chord(_)
+            if !ctx.perms.input =>
+        {
+            return tx.json(&deny("input")).await;
         }
+        // плавный путь: движение воспроизводится в ритме пальца
+        Frame::MoveT { dx, dy, t } => core.motion.push(ctx.sid, t, dx, dy),
         Frame::Move { dx, dy } => {
-            let (x, y) = sub.take(dx, dy);
+            let (x, y) = ctx.sub.take(dx, dy);
             if x != 0 || y != 0 {
                 p.mouse_move(x, y);
             }
         }
+        // перед кликом курсор доезжает до места, где его оставил палец
         Frame::Scroll { v, h } => p.scroll(v as i32, h as i32),
-        Frame::Button { button, action } => p.mouse_button(button, action),
+        Frame::Button { button, action } => {
+            core.motion.flush().await;
+            p.mouse_button(button, action)
+        }
         Frame::Key { vk, action } => p.key(vk, action),
         Frame::Text(t) => p.text(&t),
         Frame::Chord(vks) => p.chord(&vks),
         Frame::Volume { level, seq } => {
-            if !perms.media {
-                return tx.json(&deny("media")).await.is_ok();
+            if !ctx.perms.media {
+                return tx.json(&deny("media")).await;
             }
             core.set_volume_from(level as f32 / 10_000.0, seq);
         }
+        Frame::Mirror(frame) => {
+            if let Some(d) = &ctx.device {
+                core.mirror_frame(d, frame);
+            }
+        }
         Frame::Json(v) => {
-            if admin && v.get("t").and_then(|t| t.as_str()).is_some_and(|t| !matches!(t, "media" | "mute" | "power" | "timer" | "macro" | "clip-set")) {
+            if ctx.admin {
                 let reply = core.admin_cmd(&v);
-                return tx.json(&reply).await.is_ok();
+                return tx.json(&reply).await;
             }
             let Ok(cmd) = serde_json::from_value::<RemoteCmd>(v) else { return true };
-            let reply = remote_cmd(core, cmd, device, perms);
-            if let Some(r) = reply {
-                for m in r {
-                    if tx.json(&m).await.is_err() {
-                        return false;
+            match cmd {
+                RemoteCmd::RtcOffer { sdp } => return rtc_offer(core, tx, ctx, sdp).await,
+                RemoteCmd::RtcIce { candidate } => {
+                    if let Some(r) = &tx.rtc {
+                        if let Err(e) = r.add_candidate(candidate).await {
+                            tracing::debug!("ICE-кандидат отклонён: {e:#}");
+                        }
+                    }
+                }
+                cmd => {
+                    for m in remote_cmd(core, cmd, ctx.device.as_deref(), &ctx.perms) {
+                        if !tx.json(&m).await {
+                            return false;
+                        }
                     }
                 }
             }
@@ -294,10 +432,34 @@ async fn handle_frame(
     true
 }
 
-fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Perms) -> Option<Vec<Value>> {
+/// Телефон предлагает прямой канал. Ключи WebRTC-каналов выводятся из ключа этой сессии.
+async fn rtc_offer(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, sdp: Value) -> bool {
+    let Some(k) = &ctx.keys else { return true };
+    if let Some(old) = tx.rtc.take() {
+        old.close().await;
+    }
+    tx.rtc_open = false;
+    let (etx, erx) = mpsc::channel(256);
+    let ice = core.store.read().settings.ice_servers.clone();
+    match Rtc::answer(sdp, &ice, etx).await {
+        Ok((rtc, answer)) => {
+            tx.rtc = Some(Arc::new(rtc));
+            tx.rtc_ctl = Some(Channel::labeled(&k.dk, &k.nc, &k.ns, true, LABEL_RTC_CTL, false));
+            tx.rtc_fast = Some(Channel::labeled(&k.dk, &k.nc, &k.ns, true, LABEL_RTC_FAST, true));
+            ctx.rtc_rx = Some(erx);
+            tx.json_wire(&json!({ "t": "rtc-answer", "sdp": answer })).await
+        }
+        Err(e) => {
+            tracing::warn!("WebRTC: {e:#}");
+            tx.json_wire(&json!({ "t": "rtc-failed", "msg": e.to_string() })).await
+        }
+    }
+}
+
+fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Perms) -> Vec<Value> {
     let p = &core.platform;
-    let deny = |what: &str| Some(vec![json!({ "t": "denied", "what": what })]);
-    let err = |e: anyhow::Error| Some(vec![json!({ "t": "error", "msg": e.to_string() })]);
+    let deny = |what: &str| vec![json!({ "t": "denied", "what": what })];
+    let err = |e: anyhow::Error| vec![json!({ "t": "error", "msg": e.to_string() })];
     match cmd {
         RemoteCmd::Media { a } => {
             if !perms.media {
@@ -326,7 +488,7 @@ fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Pe
             match (cancel, a, sec) {
                 (true, _, _) => core.cancel_timer(),
                 (false, Some(a), Some(s)) if (10..=24 * 3600).contains(&s) => core.set_timer(a, s),
-                _ => return Some(vec![json!({ "t": "error", "msg": "таймер: от 10 секунд до 24 часов" })]),
+                _ => return vec![json!({ "t": "error", "msg": "таймер: от 10 секунд до 24 часов" })],
             }
         }
         RemoteCmd::Macro { id } => {
@@ -344,7 +506,7 @@ fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Pe
             if let Err(e) = core.set_clipboard_text(text.chars().take(1 << 20).collect()) {
                 return err(e);
             }
-            return Some(vec![json!({ "t": "ok", "for": "clip-set", "msg": "Скопировано в буфер ПК" })]);
+            return vec![json!({ "t": "ok", "for": "clip-set", "msg": "Скопировано в буфер ПК" })];
         }
         RemoteCmd::Upload { name, size } => {
             if !perms.files {
@@ -352,16 +514,37 @@ fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Pe
             }
             let t =
                 core.files.issue(crate::files::Ticket::Upload { name: crate::util::safe_file_name(&name), size, from: device.unwrap_or("ПК").to_string() });
-            return Some(vec![json!({ "t": "ticket", "name": name, "url": format!("/api/upload/{t}") })]);
+            return vec![json!({ "t": "ticket", "name": name, "url": format!("/api/upload/{t}") })];
         }
         RemoteCmd::ClipFiles => {
             if !perms.files || !perms.clipboard {
                 return deny("files");
             }
-            return Some(core.clip_file_offers());
+            return core.clip_file_offers();
         }
+        RemoteCmd::OpenUrl { url } => {
+            if !perms.clipboard {
+                return deny("clipboard");
+            }
+            if let Err(e) = core.open_url_from_phone(&url) {
+                return err(e);
+            }
+            return vec![json!({ "t": "ok", "for": "open-url", "msg": "Открыто на ПК" })];
+        }
+        RemoteCmd::Notify { app, title, text } => {
+            if let Some(d) = device {
+                core.phone_notification(d, &app, &title, &text);
+            }
+        }
+        RemoteCmd::Mirror { on, w, h, codec } => {
+            if let Some(d) = device {
+                core.mirror_state(d, on, w, h, &codec);
+            }
+        }
+        RemoteCmd::UcExit => core.uc_stop(),
+        RemoteCmd::RtcOffer { .. } | RemoteCmd::RtcIce { .. } => {}
     }
-    None
+    vec![]
 }
 
 #[cfg(test)]

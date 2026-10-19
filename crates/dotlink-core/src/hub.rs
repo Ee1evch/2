@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 pub type Update = (&'static str, Arc<Value>);
 
 /// Ключи, которые видит только дашборд на ПК.
-pub const ADMIN_ONLY: &[&str] = &["devices", "settings", "pairing", "net", "received", "outbox"];
+pub const ADMIN_ONLY: &[&str] = &["devices", "settings", "pairing", "net", "received", "outbox", "mirror", "notifs", "relay", "bt"];
 
 pub struct Hub {
     map: RwLock<BTreeMap<&'static str, Arc<Value>>>,

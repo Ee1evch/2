@@ -91,12 +91,24 @@ pub struct Channel {
     rx_prefix: [u8; 16],
     tx_ctr: u64,
     rx_ctr: u64,
+    /// Окно последних 64 счётчиков — для каналов без гарантии порядка (движения по WebRTC).
+    window: Option<u64>,
 }
+
+/// Метки ключей: основной канал и два канала WebRTC (надёжный и «как UDP»).
+pub const LABEL_MAIN: &[u8] = b"dotlink/session/v1";
+pub const LABEL_RTC_CTL: &[u8] = b"dotlink/session/v1/rtc-ctl";
+pub const LABEL_RTC_FAST: &[u8] = b"dotlink/session/v1/rtc-fast";
 
 impl Channel {
     /// `server = true` на стороне ПК: он шифрует направлением s→c и читает c→s.
     pub fn new(device_key: &[u8; 32], nonce_c: &[u8; 16], nonce_s: &[u8; 16], server: bool) -> Self {
-        let k: [u8; 96] = hkdf(&[nonce_c.as_slice(), nonce_s].concat(), device_key, b"dotlink/session/v1");
+        Self::labeled(device_key, nonce_c, nonce_s, server, LABEL_MAIN, false)
+    }
+
+    /// Отдельные ключи на каждый канал; `lossy` — кадры могут теряться и приходить не по порядку.
+    pub fn labeled(device_key: &[u8; 32], nonce_c: &[u8; 16], nonce_s: &[u8; 16], server: bool, label: &[u8], lossy: bool) -> Self {
+        let k: [u8; 96] = hkdf(&[nonce_c.as_slice(), nonce_s].concat(), device_key, label);
         let (c2s, s2c) = (&k[0..32], &k[32..64]);
         let (pc2s, ps2c): ([u8; 16], [u8; 16]) = (k[64..80].try_into().unwrap(), k[80..96].try_into().unwrap());
         let (tk, rk, tp, rp) = if server { (s2c, c2s, ps2c, pc2s) } else { (c2s, s2c, pc2s, ps2c) };
@@ -107,6 +119,7 @@ impl Channel {
             rx_prefix: rp,
             tx_ctr: 0,
             rx_ctr: 0,
+            window: lossy.then_some(0),
         }
     }
 
@@ -127,17 +140,28 @@ impl Channel {
         out
     }
 
-    /// Расшифровать; повтор или старый счётчик отвергаются.
+    /// Расшифровать; повтор и слишком старые кадры отвергаются.
     pub fn open(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
         if frame.len() < 8 + 16 {
             return None;
         }
         let ctr = u64::from_le_bytes(frame[..8].try_into().unwrap());
-        if ctr <= self.rx_ctr {
-            return None;
+        match self.window {
+            None if ctr <= self.rx_ctr => return None,
+            Some(w) if ctr <= self.rx_ctr && (self.rx_ctr - ctr >= 64 || w & (1 << (self.rx_ctr - ctr)) != 0) => return None,
+            _ => {}
         }
         let pt = self.rx.decrypt(&Self::nonce(&self.rx_prefix, ctr), &frame[8..]).ok()?;
-        self.rx_ctr = ctr;
+        if let Some(w) = self.window.as_mut() {
+            if ctr > self.rx_ctr {
+                let shift = ctr - self.rx_ctr;
+                *w = if shift >= 64 { 0 } else { *w << shift };
+                *w |= 1;
+            } else {
+                *w |= 1 << (self.rx_ctr - ctr);
+            }
+        }
+        self.rx_ctr = self.rx_ctr.max(ctr);
         Some(pt)
     }
 }
@@ -195,6 +219,31 @@ pub(crate) mod tests {
         let n = bad.len();
         bad[n - 1] ^= 1;
         assert!(s.open(&bad).is_none(), "подделка отвергается");
+    }
+
+    #[test]
+    fn lossy_channel_accepts_reordering_but_not_replays() {
+        let dk = random::<32>();
+        let (nc, ns) = (random::<16>(), random::<16>());
+        let mut c = Channel::labeled(&dk, &nc, &ns, false, LABEL_RTC_FAST, true);
+        let mut s = Channel::labeled(&dk, &nc, &ns, true, LABEL_RTC_FAST, true);
+        let f: Vec<_> = (0..5).map(|i| c.seal(&[i])).collect();
+        assert_eq!(s.open(&f[2]).unwrap(), [2]);
+        assert_eq!(s.open(&f[0]).unwrap(), [0], "пришёл позже — принят");
+        assert!(s.open(&f[2]).is_none(), "повтор отвергнут");
+        assert_eq!(s.open(&f[4]).unwrap(), [4]);
+        assert_eq!(s.open(&f[3]).unwrap(), [3]);
+        assert!(s.open(&f[0]).is_none());
+        for i in 0..70 {
+            c.seal(&[i]);
+        }
+        let late = c.seal(&[1]);
+        let newest = c.seal(&[2]);
+        assert!(s.open(&newest).is_some());
+        assert!(s.open(&late).is_some(), "в пределах окна");
+        // ключи разных каналов не подходят друг к другу
+        let mut main = Channel::new(&dk, &nc, &ns, true);
+        assert!(main.open(&c.seal(&[9])).is_none());
     }
 
     #[test]
