@@ -74,8 +74,11 @@ async fn phone_over_bluetooth_pairs_controls_and_moves_files() {
         start(Options { data_dir: None, port: Some(0), bind: "127.0.0.1".parse().unwrap(), platform: mock.clone(), host: Arc::new(NoHost), discovery: false })
             .await
             .unwrap();
-    for _ in 0..100 {
-        if run.core.hub.get("bt").is_some_and(|v| v["state"] == "online") {
+    // служба Bluetooth стартует фоном; QR и маршруты обновляются вслед за ней
+    for _ in 0..250 {
+        let qr_has_bt = run.core.hub.get("pairing").is_some_and(|v| v["url"].as_str().is_some_and(|u| u.contains("&bt=")));
+        let routes_have_bt = run.core.hub.get("routes").is_some_and(|v| v["bt"].is_string());
+        if qr_has_bt && routes_have_bt {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
