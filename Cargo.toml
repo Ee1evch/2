@@ -15,5 +15,9 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# RaptorQ в отладочной сборке медленный — тесты фонтанного кода ускоряем
+[profile.dev.package.raptorq]
+opt-level = 3
+
 [profile.release.package.dotlink-fountain]
 opt-level = 3

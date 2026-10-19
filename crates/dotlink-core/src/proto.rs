@@ -155,13 +155,32 @@ pub enum PowerAction {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "t", rename_all = "kebab-case")]
 pub enum RemoteCmd {
-    Media { a: MediaAction },
-    Mute { v: bool },
-    Power { a: PowerAction },
-    Timer { a: Option<PowerAction>, sec: Option<u32>, #[serde(default)] cancel: bool },
-    Macro { id: String },
-    ClipSet { text: String },
-    Upload { name: String, size: u64 },
+    Media {
+        a: MediaAction,
+    },
+    Mute {
+        v: bool,
+    },
+    Power {
+        a: PowerAction,
+    },
+    Timer {
+        a: Option<PowerAction>,
+        sec: Option<u32>,
+        #[serde(default)]
+        cancel: bool,
+    },
+    Macro {
+        id: String,
+    },
+    ClipSet {
+        text: String,
+    },
+    /// `size: None` — размер неизвестен (файл из «Поделиться» Android)
+    Upload {
+        name: String,
+        size: Option<u64>,
+    },
     ClipFiles,
 }
 

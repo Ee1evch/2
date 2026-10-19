@@ -142,7 +142,12 @@ impl Core {
         let hosts: Vec<&str> = addrs.iter().take(4).map(|a| a.ip.as_str()).collect();
         let first = hosts.first().copied().unwrap_or("127.0.0.1");
         // открывается и системной камерой: страница пульта сама прочитает секрет из #
-        let url = format!("http://{first}:{port}/#pair={}&pc={id}&h={}&n={}", b64url(&o.secret), hosts.join(","), percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC));
+        let url = format!(
+            "http://{first}:{port}/#pair={}&pc={id}&h={}&n={}",
+            b64url(&o.secret),
+            hosts.join(","),
+            percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC)
+        );
         self.hub.set("pairing", json!({ "url": url, "pin": o.pin, "expires": o.expires_ms, "hosts": hosts, "port": port }));
     }
 
@@ -152,12 +157,8 @@ impl Core {
     }
 
     pub fn publish_devices(&self) {
-        let online: HashMap<String, (String, u32)> = self
-            .sessions
-            .lock()
-            .values()
-            .filter_map(|s| s.device.clone().map(|d| (d, (s.addr.ip().to_string(), s.rtt.load(Ordering::Relaxed)))))
-            .collect();
+        let online: HashMap<String, (String, u32)> =
+            self.sessions.lock().values().filter_map(|s| s.device.clone().map(|d| (d, (s.addr.ip().to_string(), s.rtt.load(Ordering::Relaxed))))).collect();
         let devs: Vec<Value> = self
             .store
             .read()
@@ -206,7 +207,9 @@ impl Core {
                         let text: String = t.chars().take(32 * 1024).collect();
                         json!({ "seq": seq, "kind": "text", "text": text, "from": if from_phone { "phone" } else { "pc" } })
                     }
-                    Clip::Files(f) => json!({ "seq": seq, "kind": "files", "files": f.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string())).collect::<Vec<_>>(), "from": "pc" }),
+                    Clip::Files(f) => {
+                        json!({ "seq": seq, "kind": "files", "files": f.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string())).collect::<Vec<_>>(), "from": "pc" })
+                    }
                 };
                 self.hub.set("clip", v);
             }
@@ -275,7 +278,14 @@ impl Core {
     }
 
     pub fn add_device(&self, name: &str, key: &[u8; 32]) -> Device {
-        let d = Device { id: b64url(&crate::crypto::random::<9>()), name: name.into(), key: crate::util::b64(key), perms: Perms::default(), paired_at: now_ms(), last_seen: now_ms() };
+        let d = Device {
+            id: b64url(&crate::crypto::random::<9>()),
+            name: name.into(),
+            key: crate::util::b64(key),
+            perms: Perms::default(),
+            paired_at: now_ms(),
+            last_seen: now_ms(),
+        };
         self.store.update(|c| c.devices.push(d.clone()));
         self.publish_devices();
         if self.store.read().settings.notify {
@@ -393,7 +403,9 @@ impl Core {
                 ok("")
             }
             "device-perms" => {
-                let (Some(id), Ok(perms)) = (v["id"].as_str(), serde_json::from_value::<Perms>(v["perms"].clone())) else { return err("неверные права".into()) };
+                let (Some(id), Ok(perms)) = (v["id"].as_str(), serde_json::from_value::<Perms>(v["perms"].clone())) else {
+                    return err("неверные права".into());
+                };
                 self.store.update(|c| c.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.perms = perms.clone()));
                 self.send_device(id, || Out::Perms(perms.clone()));
                 self.publish_devices();
@@ -537,7 +549,8 @@ mod tests {
     #[test]
     fn macro_steps() {
         let p = MockPlatform::new();
-        let m = Macro { id: "x".into(), name: "x".into(), icon: "bolt".into(), kind: MacroKind::Keys, value: "win+r; wait 10\ntext: notepad, hi\nenter".into() };
+        let m =
+            Macro { id: "x".into(), name: "x".into(), icon: "bolt".into(), kind: MacroKind::Keys, value: "win+r; wait 10\ntext: notepad, hi\nenter".into() };
         run_macro_steps(&p, &m).unwrap();
         let log = p.debug_log().unwrap().to_string();
         assert!(log.contains(r#""chord":[91,82]"#), "{log}");

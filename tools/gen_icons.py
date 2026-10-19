@@ -55,3 +55,13 @@ for name, px in {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 
     # адаптивная иконка: передний план 108dp с безопасной зоной 66dp
     save(icon(int(px * 108 / 48), 0.3, transparent=True), res / f'mipmap-{name}/ic_launcher_foreground.png')
 print('icons ok')
+
+# заставка Android: тёмный фон и знак по центру — для каждого splash.png своего размера
+for p in sorted((ROOT / 'apps/android/android/app/src/main/res').glob('drawable*/splash.png')):
+    w, h = Image.open(p).size
+    im = Image.new('RGB', (w, h), BG)
+    s = int(min(w, h) * 0.3)
+    mark = icon(s, 0.1, transparent=True)
+    im.paste(mark, ((w - s) // 2, (h - s) // 2), mark)
+    im.save(p)
+print('splash ok')

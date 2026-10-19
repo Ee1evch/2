@@ -6,9 +6,9 @@ mod media;
 mod system;
 
 use super::*;
+use ::windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU8, Ordering};
-use ::windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 
 pub struct WindowsPlatform {
     input: Arc<input::Input>,
@@ -33,7 +33,8 @@ impl WindowsPlatform {
     }
 }
 
-const MEDIA_VK: [(MediaAction, u16); 5] = [(MediaAction::Toggle, 0xB3), (MediaAction::Play, 0xB3), (MediaAction::Pause, 0xB3), (MediaAction::Next, 0xB0), (MediaAction::Prev, 0xB1)];
+const MEDIA_VK: [(MediaAction, u16); 5] =
+    [(MediaAction::Toggle, 0xB3), (MediaAction::Play, 0xB3), (MediaAction::Pause, 0xB3), (MediaAction::Next, 0xB0), (MediaAction::Prev, 0xB1)];
 
 impl Platform for WindowsPlatform {
     fn name(&self) -> &'static str {

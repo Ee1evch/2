@@ -11,7 +11,7 @@ const TICKET_TTL: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug)]
 pub enum Ticket {
-    Upload { name: String, size: u64, from: String },
+    Upload { name: String, size: Option<u64>, from: String },
     Download { path: PathBuf, name: String },
 }
 
@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn tickets_are_one_shot() {
         let f = Files::default();
-        let id = f.issue(Ticket::Upload { name: "a".into(), size: 1, from: "x".into() });
+        let id = f.issue(Ticket::Upload { name: "a".into(), size: Some(1), from: "x".into() });
         assert!(f.take(&id).is_some());
         assert!(f.take(&id).is_none());
         assert!(f.take("nope").is_none());

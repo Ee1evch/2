@@ -11,11 +11,16 @@ pub fn b64url(b: &[u8]) -> String {
 
 /// Принимает base64 в любом алфавите (стандартный или URL), с выравниванием или без.
 pub fn unb64(s: &str) -> Option<Vec<u8>> {
-    let t: String = s.trim().trim_end_matches('=').chars().map(|c| match c {
-        '+' => '-',
-        '/' => '_',
-        c => c,
-    }).collect();
+    let t: String = s
+        .trim()
+        .trim_end_matches('=')
+        .chars()
+        .map(|c| match c {
+            '+' => '-',
+            '/' => '_',
+            c => c,
+        })
+        .collect();
     URL_SAFE_NO_PAD.decode(t).ok()
 }
 
@@ -43,7 +48,10 @@ pub fn safe_file_name(name: &str) -> String {
         .trim_end_matches(['.', ' '])
         .to_string();
     let stem = s.split('.').next().unwrap_or("").to_ascii_uppercase();
-    const RESERVED: [&str; 22] = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
+        "LPT7", "LPT8", "LPT9",
+    ];
     if RESERVED.contains(&stem.as_str()) {
         s.insert(0, '_');
     }

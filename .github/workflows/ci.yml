@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Ядро, веб, сквозные тесты на настоящем браузере с имитацией ПК
+  linux:
+    name: Ядро + веб + e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown, x86_64-pc-windows-gnu
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Веб — зависимости
+        working-directory: web
+        run: npm ci
+      - name: Веб — сборка (шрифт, WASM, типы, бандл)
+        working-directory: web
+        run: npm run build
+      - name: Веб — модульные тесты
+        working-directory: web
+        run: npm test
+      - name: Rust — форматирование
+        run: cargo fmt --all --check
+      - name: Rust — clippy (Linux)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Rust — clippy Windows-слоя (кросс-проверка)
+        run: cargo clippy -p dotlink-core --target x86_64-pc-windows-gnu --all-targets -- -D warnings
+      - name: Rust — тесты
+        run: cargo test --workspace
+      - name: e2e — ядро без окна
+        run: cargo build -p dotlink-server
+      - name: e2e — браузер
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: e2e — сценарии
+        working-directory: web
+        env:
+          E2E_SHOTS: ${{ github.workspace }}/e2e-shots
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e-shots
+          if-no-files-found: ignore
+
+  # Настоящая Windows: смоук-тест нативного слоя и установщик
+  windows:
+    name: Windows — тесты и установщик
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/desktop/src-tauri
+      - name: Веб — сборка
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Ядро — тесты на Windows (включая смоук-тест SendInput, Core Audio, буфера)
+        run: cargo test -p dotlink-core -- --nocapture
+      - name: Установщик DotLink (NSIS)
+        working-directory: apps/desktop/src-tauri
+        run: npx --yes @tauri-apps/cli@2.12.3 build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DotLink-Windows-installer
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+
+  # Android: тот же пульт в Capacitor + нативный поиск ПК и «Поделиться»
+  android:
+    name: Android — APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            apps/android/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Веб — сборка
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Capacitor — синхронизация
+        working-directory: apps/android
+        run: |
+          npm ci
+          npx cap sync android
+      - name: Gradle — сборка APK
+        working-directory: apps/android/android
+        run: ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DotLink-Android-apk
+          path: apps/android/android/app/build/outputs/apk/debug/*.apk

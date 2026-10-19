@@ -25,7 +25,11 @@ impl Drop for Discovery {
 fn dns_label(s: &str) -> String {
     let l: String = s.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
     let l = l.trim_matches('-').to_string();
-    if l.is_empty() { "pc".into() } else { l.chars().take(40).collect() }
+    if l.is_empty() {
+        "pc".into()
+    } else {
+        l.chars().take(40).collect()
+    }
 }
 
 /// Запускает mDNS и маяк. Ошибки не фатальны: подключиться можно и по QR.
@@ -35,7 +39,15 @@ pub async fn start(info: impl Fn() -> serde_json::Value + Send + Sync + 'static,
         let ips: Vec<std::net::IpAddr> = crate::net::addrs().iter().filter_map(|a| a.ip.parse().ok()).collect();
         let host = format!("dotlink-{}.local.", dns_label(pc_name));
         let props = [("id", pc_id), ("v", "1"), ("name", pc_name)];
-        let svc = mdns_sd::ServiceInfo::new(SERVICE, &format!("{} {}", pc_name.chars().take(40).collect::<String>(), &pc_id[..4.min(pc_id.len())]), &host, ips.as_slice(), port, &props[..])?.enable_addr_auto();
+        let svc = mdns_sd::ServiceInfo::new(
+            SERVICE,
+            &format!("{} {}", pc_name.chars().take(40).collect::<String>(), &pc_id[..4.min(pc_id.len())]),
+            &host,
+            ips.as_slice(),
+            port,
+            &props[..],
+        )?
+        .enable_addr_auto();
         d.register(svc)?;
         Ok(d)
     })();

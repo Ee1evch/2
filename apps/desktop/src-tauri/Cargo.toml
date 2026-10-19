@@ -1,0 +1,27 @@
+[package]
+name = "dotlink-desktop"
+description = "DotLink для Windows: ядро, дашборд, трей и автозапуск"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "dotlink"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+dotlink-core = { path = "../../../crates/dotlink-core" }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-notification = "2"
+anyhow = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

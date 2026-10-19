@@ -3,10 +3,13 @@
 export interface FoundPc { id: string; name: string; host: string; port: number; via: 'mdns' | 'udp' }
 export interface SharedFile { uri: string; name: string; size: number; type: string }
 
-const cap = (): any => (globalThis as any).Capacitor
-const plugin = (name: string): any => cap()?.Plugins?.[name]
+import { Capacitor, registerPlugin } from '@capacitor/core'
 
-export const isNative = (): boolean => !!cap()?.isNativePlatform?.()
+// плагины регистрируются один раз; в браузере их вызовы недоступны — проверяем isNative()
+const PLUGINS = { DotLink: registerPlugin<any>('DotLink'), Filesystem: registerPlugin<any>('Filesystem'), Haptics: registerPlugin<any>('Haptics') }
+const plugin = (name: keyof typeof PLUGINS): any => (Capacitor.isNativePlatform() ? PLUGINS[name] : undefined)
+
+export const isNative = (): boolean => Capacitor.isNativePlatform()
 
 /** Поиск ПК в сети: mDNS (_dotlink._tcp) + широковещательный UDP-запрос. */
 export async function discover(timeout = 2500): Promise<FoundPc[]> {

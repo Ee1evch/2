@@ -117,7 +117,9 @@ async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut SplitStream<WebSocket
     if !crypto::ct_eq(&mac, &crypto::auth_mac(&dk, b"c", &nonce_c, &nonce_s)) {
         return fail(tx, "bad-auth").await;
     }
-    tx.json(&json!({ "t": "welcome", "device": dev.id, "mac": b64(&crypto::auth_mac(&dk, b"s", &nonce_c, &nonce_s)), "pc": pc, "perms": dev.perms })).await.ok()?;
+    tx.json(&json!({ "t": "welcome", "device": dev.id, "mac": b64(&crypto::auth_mac(&dk, b"s", &nonce_c, &nonce_s)), "pc": pc, "perms": dev.perms }))
+        .await
+        .ok()?;
     Some(Role::Remote { device: dev.id, name: dev.name, perms: dev.perms, chan: Channel::new(&dk, &nonce_c, &nonce_s, true) })
 }
 
@@ -221,12 +223,23 @@ pub async fn run(core: Arc<Core>, ws: WebSocket, addr: SocketAddr) {
 }
 
 async fn send_snapshot(core: &Core, tx: &mut Tx, admin: bool, perms: &Perms) -> bool {
-    let snap: serde_json::Map<String, Value> = core.hub.snapshot().into_iter().filter(|(k, _)| visible(k, admin, perms)).map(|(k, v)| (k.to_string(), (*v).clone())).collect();
+    let snap: serde_json::Map<String, Value> =
+        core.hub.snapshot().into_iter().filter(|(k, _)| visible(k, admin, perms)).map(|(k, v)| (k.to_string(), (*v).clone())).collect();
     tx.json(&json!({ "t": "snapshot", "v": snap })).await.is_ok()
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, f: Frame, admin: bool, device: Option<&str>, perms: &Perms, sub: &mut SubPixel, rtt: &AtomicU32, last_pub: &mut u32) -> bool {
+async fn handle_frame(
+    core: &Arc<Core>,
+    tx: &mut Tx,
+    f: Frame,
+    admin: bool,
+    device: Option<&str>,
+    perms: &Perms,
+    sub: &mut SubPixel,
+    rtt: &AtomicU32,
+    last_pub: &mut u32,
+) -> bool {
     let p = &core.platform;
     let deny = |what: &str| json!({ "t": "denied", "what": what });
     match f {
@@ -337,7 +350,8 @@ fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Pe
             if !perms.files {
                 return deny("files");
             }
-            let t = core.files.issue(crate::files::Ticket::Upload { name: crate::util::safe_file_name(&name), size, from: device.unwrap_or("ПК").to_string() });
+            let t =
+                core.files.issue(crate::files::Ticket::Upload { name: crate::util::safe_file_name(&name), size, from: device.unwrap_or("ПК").to_string() });
             return Some(vec![json!({ "t": "ticket", "name": name, "url": format!("/api/upload/{t}") })]);
         }
         RemoteCmd::ClipFiles => {

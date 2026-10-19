@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DotLink работает только в локальной сети по http://IP-ПК — без TLS, шифрование своё (XChaCha20-Poly1305). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -8,7 +8,8 @@ export function setHaptics(on: boolean) { enabled = on }
 
 export function haptic(kind: Kind = 'tap') {
   if (!enabled) return
-  const cap = (globalThis as { Capacitor?: { Plugins?: { Haptics?: CapHaptics } } }).Capacitor?.Plugins?.Haptics
+  const g = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean; Plugins?: { Haptics?: CapHaptics } } }).Capacitor
+  const cap = g?.isNativePlatform?.() ? g.Plugins?.Haptics : undefined
   try {
     if (cap) { void cap.impact({ style: kind === 'heavy' ? 'HEAVY' : kind === 'tap' ? 'MEDIUM' : 'LIGHT' }); return }
     navigator.vibrate?.(kind === 'heavy' ? 18 : kind === 'tap' ? 7 : 4)

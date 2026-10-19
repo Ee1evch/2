@@ -15,6 +15,7 @@
     "e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
+    "@capacitor/core": "^7.6.9",
     "@noble/ciphers": "2.0.0",
     "@noble/curves": "2.0.0",
     "@noble/hashes": "2.0.0",

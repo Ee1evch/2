@@ -1,0 +1,14 @@
+{
+  "appId": "app.dotlink.remote",
+  "appName": "DotLink",
+  "webDir": "../../web/dist",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#09090a",
+    "adjustMarginsForEdgeToEdge": "auto"
+  }
+}

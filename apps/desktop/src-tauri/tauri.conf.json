@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DotLink",
+  "mainBinaryName": "DotLink",
+  "version": "0.1.0",
+  "identifier": "app.dotlink.desktop",
+  "build": {
+    "frontendDist": "../splash"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "DotLink",
+    "category": "Utility",
+    "shortDescription": "Пульт для ПК с телефона",
+    "longDescription": "Управление Windows-ПК с телефона по локальной сети: тачпад, клавиатура, медиа, питание, макросы, файлы и буфер обмена. Работает без интернета.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper" },
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["Russian", "English"],
+        "displayLanguageSelector": false,
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  }
+}

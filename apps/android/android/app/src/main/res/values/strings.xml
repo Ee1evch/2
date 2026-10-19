@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DotLink</string>
+    <string name="title_activity_main">DotLink</string>
+    <string name="package_name">app.dotlink.remote</string>
+    <string name="custom_url_scheme">app.dotlink.remote</string>
+</resources>

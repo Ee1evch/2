@@ -5,7 +5,10 @@ use crate::platform::{Event, MediaAction, MediaInfo};
 use base64::Engine;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
-use windows::Media::Control::{GlobalSystemMediaTransportControlsSession as Session, GlobalSystemMediaTransportControlsSessionManager as Manager, GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status};
+use windows::Media::Control::{
+    GlobalSystemMediaTransportControlsSession as Session, GlobalSystemMediaTransportControlsSessionManager as Manager,
+    GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
+};
 use windows::Storage::Streams::DataReader;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 

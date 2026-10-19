@@ -11,16 +11,27 @@ use std::time::Duration;
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HGLOBAL, HWND, LPARAM, LUID, POINT, WPARAM};
 use windows::Win32::Networking::NetworkListManager::{INetworkListManager, NetworkListManager, NLM_ENUM_NETWORK_CONNECTED, NLM_NETWORK_CATEGORY_PUBLIC};
-use windows::Win32::Security::{AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED, SE_SHUTDOWN_NAME, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY};
+use windows::Win32::Security::{
+    AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED, SE_SHUTDOWN_NAME, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    TOKEN_QUERY,
+};
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
-use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard, SetClipboardData};
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard, SetClipboardData,
+};
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::{CF_HDROP, CF_UNICODETEXT};
 use windows::Win32::System::Power::{GetSystemPowerStatus, SetSuspendState, SYSTEM_POWER_STATUS};
-use windows::Win32::System::Shutdown::{ExitWindowsEx, LockWorkStation, EWX_FORCEIFHUNG, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, SHTDN_REASON_FLAG_PLANNED, SHTDN_REASON_MAJOR_OTHER};
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::System::Shutdown::{
+    ExitWindowsEx, LockWorkStation, EWX_FORCEIFHUNG, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, SHTDN_REASON_FLAG_PLANNED, SHTDN_REASON_MAJOR_OTHER,
+};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows::Win32::UI::Shell::{DragQueryFileW, ShellExecuteW, DROPFILES, HDROP};
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, PostMessageW, HWND_BROADCAST, SC_MONITORPOWER, SW_HIDE, SW_SHOWNORMAL, WM_SYSCOMMAND};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, PostMessageW, HWND_BROADCAST, SC_MONITORPOWER, SW_HIDE, SW_SHOWNORMAL, WM_SYSCOMMAND,
+};
 
 fn enable_shutdown_privilege() -> anyhow::Result<()> {
     unsafe {
@@ -75,7 +86,9 @@ pub fn battery() -> Option<Battery> {
 pub fn open(target: &str, args: &str) -> anyhow::Result<()> {
     let t = HSTRING::from(target);
     let a = HSTRING::from(args);
-    let r = unsafe { ShellExecuteW(None, &HSTRING::from("open"), &t, if args.is_empty() { PCWSTR::null() } else { PCWSTR(a.as_ptr()) }, PCWSTR::null(), SW_SHOWNORMAL) };
+    let r = unsafe {
+        ShellExecuteW(None, &HSTRING::from("open"), &t, if args.is_empty() { PCWSTR::null() } else { PCWSTR(a.as_ptr()) }, PCWSTR::null(), SW_SHOWNORMAL)
+    };
     if r.0 as isize <= 32 {
         bail!("не удалось открыть «{target}» (код {})", r.0 as isize);
     }
@@ -84,7 +97,11 @@ pub fn open(target: &str, args: &str) -> anyhow::Result<()> {
 
 pub fn shell(cmd: &str) -> anyhow::Result<()> {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", cmd]).creation_flags(CREATE_NO_WINDOW).spawn().context("PowerShell")?;
+    std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", cmd])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .context("PowerShell")?;
     Ok(())
 }
 

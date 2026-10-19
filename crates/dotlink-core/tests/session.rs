@@ -55,7 +55,10 @@ async fn until(ws: &mut Ws, ch: &mut Channel, pred: impl Fn(&Value) -> bool) -> 
 #[tokio::test]
 async fn pair_control_reconnect_and_revoke() {
     let mock = Arc::new(MockPlatform::new());
-    let mut run = start(Options { data_dir: None, port: Some(0), bind: "127.0.0.1".parse().unwrap(), platform: mock.clone(), host: Arc::new(NoHost), discovery: false }).await.unwrap();
+    let mut run =
+        start(Options { data_dir: None, port: Some(0), bind: "127.0.0.1".parse().unwrap(), platform: mock.clone(), host: Arc::new(NoHost), discovery: false })
+            .await
+            .unwrap();
     let url = format!("ws://{}/ws", run.addr);
     let pairing = run.core.hub.get("pairing").unwrap();
     let qr = pairing["url"].as_str().unwrap().to_string();
@@ -167,7 +170,8 @@ async fn pair_control_reconnect_and_revoke() {
     assert_eq!(text(&mut adm).await["admin"], true);
     let snap = text(&mut adm).await;
     assert_eq!(snap["v"]["devices"][0]["name"], "Pixel 8");
-    send_json(&mut adm, json!({"t":"device-perms","id":device,"perms":{"input":false,"media":true,"power":true,"macros":true,"clipboard":true,"files":true}})).await;
+    send_json(&mut adm, json!({"t":"device-perms","id":device,"perms":{"input":false,"media":true,"power":true,"macros":true,"clipboard":true,"files":true}}))
+        .await;
     until(&mut ws3, &mut chan3, |v| v["t"] == "perms").await;
     ws3.send(Message::Binary(chan3.seal(&[1, 40, 0, 0, 0]).into())).await.unwrap();
     assert_eq!(until(&mut ws3, &mut chan3, |v| v["t"] == "denied").await["what"], "input");
@@ -182,7 +186,16 @@ async fn pair_control_reconnect_and_revoke() {
 
 #[tokio::test]
 async fn wrong_pin_is_limited() {
-    let mut run = start(Options { data_dir: None, port: Some(0), bind: "127.0.0.1".parse().unwrap(), platform: Arc::new(MockPlatform::new()), host: Arc::new(NoHost), discovery: false }).await.unwrap();
+    let mut run = start(Options {
+        data_dir: None,
+        port: Some(0),
+        bind: "127.0.0.1".parse().unwrap(),
+        platform: Arc::new(MockPlatform::new()),
+        host: Arc::new(NoHost),
+        discovery: false,
+    })
+    .await
+    .unwrap();
     let url = format!("ws://{}/ws", run.addr);
     let pin = run.core.hub.get("pairing").unwrap()["pin"].as_str().unwrap().to_string();
     let wrong = if pin == "000000" { "111111" } else { "000000" };

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Окну дашборда не нужен доступ к Tauri IPC: он говорит с ядром по WebSocket на 127.0.0.1.",
+  "windows": ["main"],
+  "permissions": []
+}

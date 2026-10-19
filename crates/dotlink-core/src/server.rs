@@ -21,6 +21,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
+/// Предел для файлов неизвестного размера.
+const MAX_UPLOAD: u64 = 64 << 30;
+
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../web/dist"]
 #[allow_missing = true]
@@ -71,7 +74,9 @@ fn err(code: StatusCode, msg: &str) -> Response {
 }
 
 async fn upload(State(core): State<Arc<Core>>, Path(ticket): Path<String>, body: Body) -> Response {
-    let Some(Ticket::Upload { name, size, from }) = core.files.take(&ticket) else { return err(StatusCode::FORBIDDEN, "билет недействителен") };
+    let Some(Ticket::Upload { name, size, from }) = core.files.take(&ticket) else {
+        return err(StatusCode::FORBIDDEN, "билет недействителен");
+    };
     let dir = core.platform.downloads_dir();
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
         return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
@@ -85,13 +90,13 @@ async fn upload(State(core): State<Arc<Core>>, Path(ticket): Path<String>, body:
         while let Some(chunk) = s.next().await {
             let chunk = chunk.map_err(std::io::Error::other)?;
             got += chunk.len() as u64;
-            if got > size {
+            if got > size.unwrap_or(MAX_UPLOAD) {
                 return Err(std::io::Error::other("файл больше заявленного"));
             }
             f.write_all(&chunk).await?;
         }
         f.flush().await?;
-        if got != size {
+        if size.is_some_and(|s| s != got) {
             return Err(std::io::Error::other("передача прервана"));
         }
         tokio::fs::rename(&tmp, &path).await?;
@@ -131,7 +136,13 @@ async fn download(State(core): State<Arc<Core>>, Path(ticket): Path<String>) -> 
 }
 
 /// Дашборд кладёт сюда файл для отправки на телефон (или принятый по QR).
-async fn outbox(ConnectInfo(addr): ConnectInfo<SocketAddr>, State(core): State<Arc<Core>>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>, body: Body) -> Response {
+async fn outbox(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(core): State<Arc<Core>>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+    body: Body,
+) -> Response {
     let token = headers.get("x-dotlink-admin").and_then(|v| v.to_str().ok()).unwrap_or("");
     if !addr.ip().is_loopback() || !crate::crypto::ct_eq(token.as_bytes(), core.admin_token.as_bytes()) {
         return err(StatusCode::FORBIDDEN, "только для дашборда");
@@ -174,7 +185,12 @@ async fn assets(uri: Uri) -> Response {
     let file = Assets::get(&path).or_else(|| (!path.contains('.')).then(|| Assets::get(&format!("{path}/index.html"))).flatten());
     let Some(file) = file else {
         if path == "index.html" {
-            return (StatusCode::OK, [(header::CONTENT_TYPE, "text/html; charset=utf-8")], "<h1>DotLink</h1><p>Интерфейс не собран: выполните <code>npm run build</code> в папке web.</p>").into_response();
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                "<h1>DotLink</h1><p>Интерфейс не собран: выполните <code>npm run build</code> в папке web.</p>",
+            )
+                .into_response();
         }
         return StatusCode::NOT_FOUND.into_response();
     };

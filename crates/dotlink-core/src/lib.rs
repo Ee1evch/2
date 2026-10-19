@@ -36,7 +36,14 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { data_dir: default_data_dir(), port: None, bind: IpAddr::V4(Ipv4Addr::UNSPECIFIED), platform: platform::native(), host: Arc::new(NoHost), discovery: true }
+        Self {
+            data_dir: default_data_dir(),
+            port: None,
+            bind: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            platform: platform::native(),
+            host: Arc::new(NoHost),
+            discovery: true,
+        }
     }
 }
 
@@ -94,13 +101,11 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
     let (etx, erx) = std::sync::mpsc::channel();
     {
         let core = core.clone();
-        std::thread::Builder::new()
-            .name("dotlink-events".into())
-            .spawn(move || {
-                for ev in erx {
-                    core.handle_event(ev);
-                }
-            })?;
+        std::thread::Builder::new().name("dotlink-events".into()).spawn(move || {
+            for ev in erx {
+                core.handle_event(ev);
+            }
+        })?;
     }
     core.publish_all();
     opts.platform.start(etx);

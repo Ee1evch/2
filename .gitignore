@@ -14,3 +14,4 @@ apps/android/android/app/src/main/assets/public/
 apps/android/android/capacitor-cordova-android-plugins/
 test-results/
 playwright-report/
+apps/desktop/src-tauri/gen/

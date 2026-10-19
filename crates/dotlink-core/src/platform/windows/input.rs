@@ -17,17 +17,11 @@ fn send(inputs: &[INPUT]) {
 }
 
 fn mouse(flags: MOUSE_EVENT_FLAGS, dx: i32, dy: i32, data: i32) -> INPUT {
-    INPUT {
-        r#type: INPUT_MOUSE,
-        Anonymous: INPUT_0 { mi: MOUSEINPUT { dx, dy, mouseData: data as _, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
-    }
+    INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dx, dy, mouseData: data as _, dwFlags: flags, time: 0, dwExtraInfo: 0 } } }
 }
 
 fn kbd(vk: u16, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
-    INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
-    }
+    INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: 0 } } }
 }
 
 fn is_extended(vk: u16) -> bool {
@@ -70,7 +64,14 @@ impl Input {
                 (p.x, p.y)
             }
         };
-        let (vx, vy, vw, vh) = unsafe { (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1), GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1)) };
+        let (vx, vy, vw, vh) = unsafe {
+            (
+                GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1),
+                GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1),
+            )
+        };
         let x = (cx + dx).clamp(vx, vx + vw - 1);
         let y = (cy + dy).clamp(vy, vy + vh - 1);
         // пиксель → 0..65535 с округлением вверх: Windows переводит обратно отбрасыванием дробной части

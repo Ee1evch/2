@@ -12,7 +12,7 @@ interface Up { name: string; size: number; done: number; state: 'up' | 'ok' | 'e
 /** Загрузка на ПК: билет по защищённому каналу, сами байты — отдельным HTTP-запросом. */
 async function ticket(name: string, size: number): Promise<string> {
   const wait = link.once('ticket', (m) => m.name === name)
-  link.json({ t: 'upload', name, size })
+  link.json({ t: 'upload', name, size: size >= 0 ? size : null })
   return hostUrl((await wait).url)
 }
 
