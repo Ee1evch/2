@@ -21,6 +21,12 @@ export function Pad() {
   const field = useRef<DotFieldApi | null>(null)
   const area = useRef<HTMLDivElement>(null)
   const [kbd, setKbd] = useState(false)
+  // подсказка — только пока человек не освоился (первые несколько жестов)
+  const [hint, setHint] = useState(() => { try { return Number(localStorage.getItem('dotlink.padUses') || 0) < 3 } catch { return true } })
+  const used = () => {
+    if (!hint) return
+    try { const n = Number(localStorage.getItem('dotlink.padUses') || 0) + 1; localStorage.setItem('dotlink.padUses', String(n)); if (n >= 3) setHint(false) } catch { setHint(false) }
+  }
   const pad = useMemo(() => new Trackpad({
     move: (dx, dy, t) => link.move(dx, dy, t),
     scroll: (v, h) => link.scroll(v, h),
@@ -49,15 +55,17 @@ export function Pad() {
           const evs = (e as PointerEvent).getCoalescedEvents?.() ?? []
           for (const ev of evs.length ? evs : [e]) { const [x, y] = rel(ev); pad.move(e.pointerId, x, y, ev.timeStamp) }
         }}
-        onPointerUp={(e) => pad.up(e.pointerId)}
+        onPointerUp={(e) => { pad.up(e.pointerId); used() }}
         onPointerCancel={(e) => pad.cancel(e.pointerId)}
         onContextMenu={(e) => e.preventDefault()}>
         <DotField mode="pad" apiRef={field} pitch={11} />
-        <div class="pad-hint" aria-hidden="true">
-          <span>1 палец — курсор · тап — клик</span>
-          <span>2 пальца — прокрутка · тап — ПКМ</span>
-          <span>тап + провести — перетащить</span>
-        </div>
+        {hint && (
+          <div class="pad-hint" aria-hidden="true">
+            <span>1 палец — курсор · тап — клик</span>
+            <span>2 пальца — прокрутка · тап — ПКМ</span>
+            <span>тап + провести — перетащить</span>
+          </div>
+        )}
       </div>
       <div class="pad-btns">
         <MouseBtn b="left" label="Левая кнопка" />

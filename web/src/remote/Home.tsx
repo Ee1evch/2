@@ -152,16 +152,3 @@ export function TimerCard({ i }: { i?: number }) {
     </Card>
   )
 }
-
-export function Home() {
-  return (
-    <div class="grid home-grid">
-      <TimerCard i={0} />
-      <MediaCard i={0} />
-      <VolumeCard i={1} />
-      <SysCards i={2} />
-      <WindowCard i={4} />
-      <MacrosCard i={5} limit={6} />
-    </div>
-  )
-}

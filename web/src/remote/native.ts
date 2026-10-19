@@ -88,6 +88,9 @@ export async function copyText(text: string): Promise<boolean> {
   return ok
 }
 
+/** Можно ли прочитать буфер телефона: в APK — всегда, в браузере — только на защищённой странице. */
+export const canReadClipboard = (): boolean => isNative() || (typeof isSecureContext !== 'undefined' && isSecureContext && !!navigator.clipboard?.readText)
+
 export async function readText(): Promise<string | null> {
   try { return await navigator.clipboard.readText() } catch { return null }
 }

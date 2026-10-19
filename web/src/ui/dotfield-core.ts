@@ -72,7 +72,9 @@ export function createField(cv: HTMLCanvasElement | OffscreenCanvas, mode: Mode,
     st.ripples = st.ripples.filter((r) => now - r.t < 1600)
 
     const { mu, fg, ac } = col
-    const step = pitch, cols = Math.ceil(W / step) + 1, rows = Math.ceil(H / step) + 1
+    // тачпад — внутри рамки: точки не режутся краем; фон — во весь размах
+    const step = pitch, inset = mode === 'pad' ? step * 0.9 : -step
+    const cols = Math.floor((W - 2 * inset) / step) + 1, rows = Math.floor((H - 2 * inset) / step) + 1
     const ox = (W - (cols - 1) * step) / 2, oy = (H - (rows - 1) * step) / 2
     const ph = st.phase, scale = SCALE[mode], cx = W / 2, cy = H * 0.45
     const pulseR = ((ph * 70) % (Math.hypot(W, H) / 2 + 100)) - 30

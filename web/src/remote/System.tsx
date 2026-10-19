@@ -5,8 +5,35 @@ import { forgetPc, loadSaved, type Via } from '../lib/link'
 import type { PowerAction } from '../lib/proto'
 import { TimerCard } from './Home'
 import { link, prefs, setPref } from './state'
+import { isNative, openSettings } from './native'
+import { caps, refreshCaps } from './phonectl'
 
 const power = (a: PowerAction) => link.json({ t: 'power', a })
+
+/** Что телефон разрешил: управление с ПК, уведомления, Bluetooth; и что синхронизировать. */
+function Continuity() {
+  const p = prefs.value
+  const c = caps.value
+  const row = (on: boolean | undefined, label: string, hint: string, what: 'accessibility' | 'notifications' | 'bluetooth') => (
+    <div class="cap-row">
+      <i class={'sdot ' + (on ? 'ok' : '')} />
+      <span class="grow"><b>{label}</b><small class="muted">{hint}</small></span>
+      {!on && <Button size="sm" onClick={() => { void openSettings(what); setTimeout(() => void refreshCaps(), 1500) }}>Включить</Button>}
+    </div>
+  )
+  return (
+    <Card label="Телефон и ПК" icon="phone" span={2}>
+      {isNative() && c && <>
+        {row(c.control, 'Управление с ПК', 'Касания, жесты и текст с ПК, курсор мыши ПК', 'accessibility')}
+        {row(c.notifications, 'Уведомления на ПК', 'Сообщения и звонки видны на компьютере', 'notifications')}
+        {row(c.bluetooth, 'Bluetooth', 'Связь с ПК без Wi-Fi и интернета', 'bluetooth')}
+      </>}
+      {!isNative() && <p class="muted small" style={{ margin: 0 }}>Экран телефона на ПК, управление телефоном и Bluetooth работают в приложении DotLink для Android. В браузере доступно всё остальное.</p>}
+      <Toggle checked={p.clipAuto} onChange={(v) => setPref('clipAuto', v)} label="Общий буфер обмена" hint="Скопировали на одном устройстве — вставляйте на другом" />
+      {isNative() && <Toggle checked={p.notifs} onChange={(v) => setPref('notifs', v)} label="Пересылать уведомления" hint="Только пока телефон подключён к ПК" />}
+    </Card>
+  )
+}
 
 function TimerSetup() {
   const [open, setOpen] = useState(false)
@@ -62,6 +89,8 @@ export function System({ onSwitch }: { onSwitch: () => void }) {
           <dt>Задержка</dt><dd class="num">{link.rtt.value} мс</dd>
         </dl>
       </Card>
+
+      <Continuity />
 
       <Card label="Тачпад и отклик" icon="pad" span={2}>
         <div class="field"><span class="label">Скорость курсора · {p.speed.toFixed(1)}×</span>

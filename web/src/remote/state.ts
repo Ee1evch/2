@@ -15,7 +15,7 @@ export interface Prefs extends PadPrefs {
   /** виджеты на главном экране — по порядку */
   widgets: string[]
 }
-export const DEFAULT_WIDGETS = ['link', 'media', 'volume', 'sys', 'clip', 'actions', 'window', 'timer']
+export const DEFAULT_WIDGETS = ['link', 'media', 'volume', 'sys', 'clip', 'phone', 'actions', 'window']
 const KEY = 'dotlink.prefs'
 function load(): Prefs {
   const base: Prefs = { ...DEFAULT_PREFS, haptics: true, clipAuto: true, notifs: true, widgets: DEFAULT_WIDGETS }

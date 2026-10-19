@@ -133,6 +133,22 @@ describe('DotLink e2e', () => {
     await shot(phone, 'phone-keyboard')
   })
 
+  it('виджеты: связь на главном экране, скрыть и вернуть', async () => {
+    await phone.getByRole('tab', { name: 'Пульт' }).click()
+    await phone.getByText('Wi-Fi · напрямую').first().waitFor()
+    await phone.getByRole('button', { name: 'Настроить виджеты' }).click()
+    const row = phone.locator('.widget-row', { hasText: 'Процессор и память' })
+    await row.getByRole('button', { name: 'Скрыть' }).click()
+    await phone.keyboard.press('Escape')
+    await expect.poll(() => phone.getByText('Процессор', { exact: true }).count()).toBe(0)
+    expect(await phone.evaluate(() => JSON.parse(localStorage.getItem('dotlink.prefs') || '{}').widgets)).not.toContain('sys')
+    await phone.getByRole('button', { name: 'Настроить виджеты' }).click()
+    await phone.locator('.widget-row', { hasText: 'Процессор и память' }).getByRole('button', { name: 'Показать' }).click()
+    await phone.keyboard.press('Escape')
+    await phone.getByText('Процессор', { exact: true }).waitFor()
+    await shot(phone, 'phone-widgets')
+  })
+
   it('громкость и музыка синхронизируются с ПК', async () => {
     await phone.getByRole('tab', { name: 'Пульт' }).click()
     const slider = phone.getByRole('slider', { name: 'Громкость ПК' })

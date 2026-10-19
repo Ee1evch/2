@@ -4,7 +4,7 @@ import { fileToPayload, formatBytes, pickFiles, timeAgo } from '../lib/format'
 import { cameraAvailable } from '../lib/qrscan'
 import type { Payload } from '../lib/qrstream'
 import { QrReceiveView, QrSendView } from '../features/QrStream'
-import { copyText, readShared, readText, saveBytes, saveFromUrl, uploadShared } from './native'
+import { canReadClipboard, copyText, readShared, readText, saveBytes, saveFromUrl, uploadShared } from './native'
 import { fetchInSession, sendInSession } from '../lib/filexfer'
 import { hostUrl, link, offers, sharedQueue } from './state'
 
@@ -127,7 +127,7 @@ export function Files() {
           <textarea class="input" rows={3} placeholder="Текст для буфера ПК" value={note} onInput={(e) => setNote((e.target as HTMLTextAreaElement).value)} />
           <div class="row wrap">
             <Button variant="primary" size="sm" icon="send" disabled={!note} onClick={() => { link.json({ t: 'clip-set', text: note }); setNote('') }}>В буфер ПК</Button>
-            <Button size="sm" icon="clipboard" onClick={async () => { const t = await readText(); if (t) setNote(t); else toast('Телефон не дал прочитать буфер — вставьте вручную', 'err') }}>Вставить с телефона</Button>
+            {canReadClipboard() && <Button size="sm" icon="clipboard" onClick={async () => { const t = await readText(); if (t) setNote(t); else toast('Телефон не дал прочитать буфер — вставьте вручную', 'err') }}>Вставить с телефона</Button>}
           </div>
         </>}
       </Card>
