@@ -3,9 +3,18 @@
 //   тап и сразу касание с движением — перетаскивание (кнопка зажата, пока палец на экране);
 //   два пальца — прокрутка с инерцией, тап двумя — ПКМ, тремя — средняя кнопка.
 // Логика без DOM: события подаются извне, действия уходят в PadOut — так её легко тестировать.
+//
+// Плавность: положение пальца проходит фильтр One Euro (дрожание сенсора гасится, быстрые
+// движения — без задержки), ускорение считается по сглаженной скорости, а не по скачущим
+// интервалам между событиями. Каждое движение несёт время касания — ПК проигрывает путь
+// в том же ритме (crates/dotlink-core/src/motion.rs). Пока палец стоит, остаток пути
+// фильтра доезжает в ритме кадров экрана.
+
+import { OneEuro2D } from '../lib/oneeuro'
 
 export interface PadOut {
-  move(dx: number, dy: number): void
+  /** Смещение курсора в пикселях; `t` — время касания (мс, часы performance.now). */
+  move(dx: number, dy: number, t?: number): void
   scroll(v: number, h: number): void
   button(b: 'left' | 'right' | 'middle', a: 'down' | 'up' | 'click'): void
   haptic(kind: 'tick' | 'tap' | 'heavy'): void
@@ -41,12 +50,17 @@ export class Trackpad {
   private inertia: { v: number; h: number } | null = null
   private raf = 0
   private lastScrollT = 0
+  private readonly flt = new OneEuro2D()
+  private tracking = false
+  private raw = { x: 0, y: 0, t: 0 }
+  private settleId = 0
 
   constructor(private readonly out: PadOut, private readonly now: () => number = () => performance.now()) {}
 
   down(id: number, x: number, y: number) {
     this.stopInertia()
     const t = this.now()
+    this.tracking = false
     if (this.pts.size === 0) {
       this.maxFingers = 0
       this.startT = t
@@ -79,6 +93,7 @@ export class Trackpad {
     // у coalesced-событий своё время — по нему считаем скорость пальца
     const t = at ?? this.now()
     const dx = x - p.x, dy = y - p.y, dt = Math.max(1, t - p.t)
+    const prev = { x: p.x, y: p.y, t: p.t }
     p.x = x; p.y = y; p.t = t
     this.out.touch?.(id, x, y, true)
     if (!this.moved && Math.hypot(x - p.x0, y - p.y0) > TAP_SLOP) {
@@ -108,10 +123,46 @@ export class Trackpad {
     }
     if (this.mode === 'scroll') return // второй палец поднят — не дёргаем курсор
     if (this.mode !== 'drag') this.mode = 'move'
-    // ускорение: медленно — точно, быстро — далеко
-    const speed = Math.hypot(dx, dy) / dt
-    const gain = this.prefs.speed * (1 + this.prefs.accel * Math.min(2.4, Math.max(0, (speed - 0.25) * 1.5)))
-    this.out.move(dx * gain, dy * gain)
+    if (!this.tracking) { this.flt.reset(prev.x, prev.y, prev.t); this.tracking = true }
+    this.raw = { x, y, t }
+    this.step(x, y, t)
+    this.scheduleSettle()
+  }
+
+  /** Ускорение по сглаженной скорости: медленно — точно, быстро — далеко. */
+  private gain(): number {
+    return this.prefs.speed * (1 + this.prefs.accel * Math.min(2.4, Math.max(0, (this.flt.speed - 0.25) * 1.5)))
+  }
+
+  private step(x: number, y: number, t: number) {
+    const f = this.flt, x0 = f.x, y0 = f.y
+    f.filter(x, y, t)
+    const g = this.gain(), dx = (f.x - x0) * g, dy = (f.y - y0) * g
+    if (dx || dy) this.out.move(dx, dy, t)
+  }
+
+  /** Палец замер, а событий нет — остаток пути доезжает в ритме кадров. */
+  private scheduleSettle() {
+    if (this.settleId) return
+    this.settleId = raf(() => {
+      this.settleId = 0
+      if (!this.tracking) return
+      const t = this.now()
+      if (t - this.raw.t > 12) {
+        this.step(this.raw.x, this.raw.y, t)
+        if (Math.hypot(this.raw.x - this.flt.x, this.raw.y - this.flt.y) < 0.05) return
+      }
+      this.scheduleSettle()
+    })
+  }
+
+  /** Палец поднят — остаток пути сразу, чтобы курсор встал туда, куда его довели. */
+  private finishTrack() {
+    if (!this.tracking) return
+    this.tracking = false
+    caf(this.settleId); this.settleId = 0
+    const g = this.gain(), dx = (this.raw.x - this.flt.x) * g, dy = (this.raw.y - this.flt.y) * g
+    if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) this.out.move(dx, dy, Math.max(this.raw.t, this.now()))
   }
 
   up(id: number) {
@@ -119,7 +170,8 @@ export class Trackpad {
     if (!p) return
     this.pts.delete(id)
     this.out.touch?.(id, p.x, p.y, false)
-    if (this.pts.size > 0) return
+    if (this.pts.size > 0) { this.tracking = false; return }
+    this.finishTrack()
     if (this.longTimer) { clearTimeout(this.longTimer); this.longTimer = null }
     const t = this.now()
     const mode = this.mode
@@ -140,6 +192,7 @@ export class Trackpad {
   }
 
   cancel(id: number) {
+    this.tracking = false
     if (this.mode === 'drag' && this.pts.size === 1) this.out.button('left', 'up')
     if (this.pts.has(id)) { this.pts.delete(id); this.out.touch?.(id, 0, 0, false) }
     if (this.pts.size === 0) { this.mode = 'idle'; if (this.longTimer) { clearTimeout(this.longTimer); this.longTimer = null } }

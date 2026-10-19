@@ -30,13 +30,13 @@ describe('тачпад', () => {
     const s = setup()
     s.pad.down(1, 0, 0)
     for (let i = 1; i <= 10; i++) { s.tick(16); s.pad.move(1, i * 2, 0) }
-    const slow = s.moved().x
     s.pad.up(1)
+    const slow = s.moved().x
     s.reset(); s.tick(500)
     s.pad.down(1, 0, 0)
     for (let i = 1; i <= 10; i++) { s.tick(16); s.pad.move(1, i * 20, 0) }
-    const fast = s.moved().x
     s.pad.up(1)
+    const fast = s.moved().x
     expect(s.log).toEqual([])
     expect(slow).toBeGreaterThan(0)
     // в 10 раз больший путь пальца даёт заметно больше, чем в 10 раз больший путь курсора
@@ -71,5 +71,24 @@ describe('тачпад', () => {
     s.pad.up(1)
     expect(s.log).toEqual(['right:click'])
     vi.useRealTimers()
+  })
+
+  it('сглаживание: дрожание пальца гасится, весь путь доходит до курсора', () => {
+    const moves: { dx: number; t?: number }[] = []
+    const pad = new Trackpad({ move: (dx, _dy, t) => moves.push({ dx, t }), scroll: () => {}, button: () => {}, haptic: () => {} }, () => 0)
+    pad.prefs = { ...pad.prefs, accel: 0, speed: 1 }
+    pad.down(1, 0, 0)
+    // ровное движение 1 px/8 мс с шумом сенсора ±0.6 px
+    let t = 0
+    for (let i = 1; i <= 120; i++) { t += 8; pad.move(1, 12 + i + (i % 2 ? 0.6 : -0.6), 0, t) }
+    pad.up(1)
+    const total = moves.reduce((a, m) => a + m.dx, 0)
+    expect(total).toBeCloseTo(131.4, 6) // ровно путь пальца: от 0 до последнего касания
+    // шаги курсора ровнее касаний: без фильтра они бы чередовались 2.2 / −0.2 (разброс 2.4 px)
+    const steady = moves.slice(40, 110).map((m) => m.dx)
+    expect(Math.max(...steady) - Math.min(...steady)).toBeLessThan(2.4 / 3)
+    expect(steady.every((d) => d > 0)).toBe(true)
+    // время касания передаётся вместе с движением
+    expect(moves[5].t).toBe(48)
   })
 })

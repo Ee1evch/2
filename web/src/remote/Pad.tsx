@@ -22,7 +22,7 @@ export function Pad() {
   const area = useRef<HTMLDivElement>(null)
   const [kbd, setKbd] = useState(false)
   const pad = useMemo(() => new Trackpad({
-    move: (dx, dy) => link.move(dx, dy),
+    move: (dx, dy, t) => link.move(dx, dy, t),
     scroll: (v, h) => link.scroll(v, h),
     button: (b, a) => link.raw(buttonFrame(b, a)),
     haptic: (k) => haptic(k),

@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks'
 import { Button, Card, DotSlider, Segmented, Sheet, Tile, Toggle, DotDisplay } from '../ui'
 import { formatUptime } from '../lib/format'
-import { forgetPc, loadSaved } from '../lib/link'
+import { forgetPc, loadSaved, type Via } from '../lib/link'
 import type { PowerAction } from '../lib/proto'
 import { TimerCard } from './Home'
 import { link, prefs, setPref } from './state'
@@ -57,6 +57,7 @@ export function System({ onSwitch }: { onSwitch: () => void }) {
           <dt>Ядер</dt><dd>{s?.cores?.length ?? '—'}</dd>
           <dt>Память</dt><dd>{s ? `${(s.mem_total / 1024 ** 3).toFixed(1)} ГБ` : '—'}</dd>
           {s?.battery && <><dt>Батарея</dt><dd>{s.battery.percent}%{s.battery.charging ? ', заряжается' : ''}</dd></>}
+          <dt>Путь</dt><dd>{viaLabel(link.via.value)}{link.p2p.value ? ' · напрямую' : ''}</dd>
           <dt>Адрес</dt><dd class="num">{link.host.value || '—'}</dd>
           <dt>Задержка</dt><dd class="num">{link.rtt.value} мс</dd>
         </dl>
@@ -86,3 +87,5 @@ export function System({ onSwitch }: { onSwitch: () => void }) {
     </div>
   )
 }
+
+export const viaLabel = (v: Via | null) => (v === 'lan' ? 'Wi-Fi' : v === 'relay' ? 'Интернет' : v === 'bt' ? 'Bluetooth' : '—')

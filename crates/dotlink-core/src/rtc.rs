@@ -97,10 +97,7 @@ impl Rtc {
     /// Ответ на предложение телефона. Кандидаты ПК уходят по одному через `RtcEvent::Ice` (trickle).
     pub async fn answer(offer: Value, ice: &[IceServer], events: mpsc::Sender<RtcEvent>) -> anyhow::Result<(Self, Value)> {
         let offer: RTCSessionDescription = serde_json::from_value(offer)?;
-        let ice_servers = ice
-            .iter()
-            .map(|s| RTCIceServer { urls: s.urls.clone(), username: s.username.clone(), credential: s.credential.clone() })
-            .collect();
+        let ice_servers = ice.iter().map(|s| RTCIceServer { urls: s.urls.clone(), username: s.username.clone(), credential: s.credential.clone() }).collect();
         let config = RTCConfigurationBuilder::new().with_ice_servers(ice_servers).build();
         let handler = Handler { events, ctl: Arc::default(), fast: Arc::default() };
         let (ctl, fast) = (handler.ctl.clone(), handler.fast.clone());

@@ -1,6 +1,6 @@
 // Бинарные кадры частых событий — зеркало crates/dotlink-core/src/proto.rs.
 
-export const OP = { MOVE: 1, SCROLL: 2, BUTTON: 3, KEY: 4, TEXT: 5, CHORD: 6, VOLUME: 7, PING: 8 } as const
+export const OP = { MOVE: 1, SCROLL: 2, BUTTON: 3, KEY: 4, TEXT: 5, CHORD: 6, VOLUME: 7, PING: 8, MOVE_T: 9, MIRROR: 0x0a, UC_MOVE: 0x20, UC_BUTTON: 0x21, UC_SCROLL: 0x22 } as const
 
 const i16 = (v: number) => Math.max(-32768, Math.min(32767, Math.round(v)))
 
@@ -14,6 +14,15 @@ function frame(op: number, ...i16s: number[]): Uint8Array {
 
 /** dx, dy — в четвертях пикселя. */
 export const moveFrame = (qx: number, qy: number) => frame(OP.MOVE, qx, qy)
+/** Движение с временем касания (мс, по кругу u32) — ПК проигрывает путь в ритме пальца. */
+export function moveTFrame(qx: number, qy: number, t: number): Uint8Array {
+  const b = new Uint8Array(9)
+  const d = new DataView(b.buffer)
+  b[0] = OP.MOVE_T
+  d.setInt16(1, i16(qx), true); d.setInt16(3, i16(qy), true)
+  d.setUint32(5, Math.round(t) >>> 0, true)
+  return b
+}
 /** v, h — единицы колеса Windows (120 = щелчок); дробные — плавная прокрутка. */
 export const scrollFrame = (v: number, h: number) => frame(OP.SCROLL, v, h)
 

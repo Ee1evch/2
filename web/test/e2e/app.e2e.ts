@@ -74,7 +74,14 @@ describe('DotLink e2e', () => {
     const saved = await phone.evaluate(() => JSON.parse(localStorage.getItem('dotlink.pcs') || '[]'))
     expect(saved).toHaveLength(1)
     expect(saved[0].key).toMatch(/^[A-Za-z0-9+/=]{44}$/)
+    expect(saved[0].routes).toBeTruthy() // ПК прислал маршруты: адреса в сети, STUN
     await shot(phone, 'phone-home')
+  })
+
+  it('поверх сессии поднимается прямой канал WebRTC', async () => {
+    await phone.getByRole('tab', { name: 'Система' }).click()
+    await phone.getByText('Wi-Fi · напрямую').waitFor({ timeout: 15_000 })
+    await phone.getByRole('tab', { name: 'Пульт' }).click()
   })
 
   it('тачпад: движение, тап, прокрутка двумя пальцами', async () => {

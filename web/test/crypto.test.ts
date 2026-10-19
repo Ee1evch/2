@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { hex, random, utf8 } from '../src/lib/b64'
-import { authMac, Channel, deviceKey, PairKeys, pairMac, pairTranscript } from '../src/lib/crypto'
+import { authMac, Channel, deviceKey, LABEL_MAIN, LABEL_RTC_FAST, PairKeys, pairMac, pairTranscript } from '../src/lib/crypto'
 
 // Те же входы и ожидания, что в crates/dotlink-core/src/crypto.rs (tests::vectors)
 describe('совместимость с ядром на Rust', () => {
@@ -21,6 +21,8 @@ describe('совместимость с ядром на Rust', () => {
     expect(hex(dk)).toBe('14bf51f0058e34ced8e9811ee1194801fc34c9d79111a6dbb6139d0621ded049')
     expect(hex(auth)).toBe('b0244b6bac8fcd2e61ed69003987799e2f7f37a6a084fa52ee4502295cc95e21')
     expect(hex(frame)).toBe('0100000000000000e318bcf24df085aa8e046f583b812bd470eda7ab5d')
+    const fast = new Channel(dk, nc, ns, false, LABEL_RTC_FAST, true).seal(new Uint8Array([9, 4, 0, 0xfc, 0xff, 0x10, 0, 0, 0]))
+    expect(hex(fast)).toBe('01000000000000000aea09aeda947ee931af40f36f7bf8b022fb67ee9bf974b7b2')
   })
 
   it('канал: туда-обратно, повтор и подделка', () => {
@@ -33,5 +35,23 @@ describe('совместимость с ядром на Rust', () => {
     expect(new TextDecoder().decode(c.open(back)!)).toBe('state')
     const bad = c.seal(utf8('x')); bad[bad.length - 1] ^= 1
     expect(s.open(bad)).toBeNull()
+  })
+
+  it('канал без порядка: перестановки принимаются, повторы — нет', () => {
+    const dk = random(32), nc = random(16), ns = random(16)
+    const c = new Channel(dk, nc, ns, false, LABEL_RTC_FAST, true), s = new Channel(dk, nc, ns, true, LABEL_RTC_FAST, true)
+    const f = [0, 1, 2, 3, 4].map((i) => c.seal(new Uint8Array([i])))
+    expect(s.open(f[2])![0]).toBe(2)
+    expect(s.open(f[0])![0]).toBe(0)
+    expect(s.open(f[2])).toBeNull()
+    expect(s.open(f[4])![0]).toBe(4)
+    expect(s.open(f[3])![0]).toBe(3)
+    expect(s.open(f[0])).toBeNull()
+    for (let i = 0; i < 70; i++) c.seal(new Uint8Array([i]))
+    const late = c.seal(new Uint8Array([1])), newest = c.seal(new Uint8Array([2]))
+    expect(s.open(newest)).not.toBeNull()
+    expect(s.open(late)).not.toBeNull()
+    // ключи разных каналов не подходят друг к другу
+    expect(new Channel(dk, nc, ns, true, LABEL_MAIN).open(c.seal(new Uint8Array([9])))).toBeNull()
   })
 })

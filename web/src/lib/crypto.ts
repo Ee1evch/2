@@ -34,21 +34,29 @@ export const deviceKey = (shared: Uint8Array, secret: Uint8Array, transcript: Ui
 export const authMac = (dk: Uint8Array, who: 'c' | 's', nc: Uint8Array, ns: Uint8Array) => macOf(dk, utf8('dotlink/auth/v1'), utf8(who), nc, ns)
 
 /** Защищённый канал: 8 байт счётчика + шифртекст. Сторона телефона шифрует направлением c→s. */
+export const LABEL_MAIN = 'dotlink/session/v1'
+export const LABEL_RTC_CTL = 'dotlink/session/v1/rtc-ctl'
+export const LABEL_RTC_FAST = 'dotlink/session/v1/rtc-fast'
+
+/** Шифрованный канал. `lossy` — кадры могут теряться и приходить не по порядку (WebRTC «fast»):
+ *  тогда вместо строгого счётчика — окно последних 64 номеров, повтор всё равно отвергается. */
 export class Channel {
   private txCtr = 0n
   private rxCtr = 0n
+  private window: bigint | null
   private readonly txKey: Uint8Array
   private readonly rxKey: Uint8Array
   private readonly txPrefix: Uint8Array
   private readonly rxPrefix: Uint8Array
 
-  constructor(dk: Uint8Array, nc: Uint8Array, ns: Uint8Array, server = false) {
-    const k = hkdf(sha256, dk, concat(nc, ns), utf8('dotlink/session/v1'), 96)
+  constructor(dk: Uint8Array, nc: Uint8Array, ns: Uint8Array, server = false, label = LABEL_MAIN, lossy = false) {
+    const k = hkdf(sha256, dk, concat(nc, ns), utf8(label), 96)
     const c2s = k.slice(0, 32), s2c = k.slice(32, 64), pc2s = k.slice(64, 80), ps2c = k.slice(80, 96)
     this.txKey = server ? s2c : c2s
     this.rxKey = server ? c2s : s2c
     this.txPrefix = server ? ps2c : pc2s
     this.rxPrefix = server ? pc2s : ps2c
+    this.window = lossy ? 0n : null
   }
 
   private static nonce(prefix: Uint8Array, ctr: bigint): Uint8Array {
@@ -70,11 +78,18 @@ export class Channel {
   open(frame: Uint8Array): Uint8Array | null {
     if (frame.length < 24) return null
     const ctr = new DataView(frame.buffer, frame.byteOffset, 8).getBigUint64(0, true)
-    if (ctr <= this.rxCtr) return null
-    try {
-      const pt = xchacha20poly1305(this.rxKey, Channel.nonce(this.rxPrefix, ctr)).decrypt(frame.subarray(8))
-      this.rxCtr = ctr
-      return pt
-    } catch { return null }
+    const w = this.window
+    if (w === null) { if (ctr <= this.rxCtr) return null }
+    else if (ctr <= this.rxCtr && (this.rxCtr - ctr >= 64n || (w & (1n << (this.rxCtr - ctr))) !== 0n)) return null
+    let pt: Uint8Array
+    try { pt = xchacha20poly1305(this.rxKey, Channel.nonce(this.rxPrefix, ctr)).decrypt(frame.subarray(8)) } catch { return null }
+    if (w !== null) {
+      if (ctr > this.rxCtr) {
+        const shift = ctr - this.rxCtr
+        this.window = ((shift >= 64n ? 0n : (w << shift) & 0xffffffffffffffffn)) | 1n
+      } else this.window = w | (1n << (this.rxCtr - ctr))
+    }
+    if (ctr > this.rxCtr) this.rxCtr = ctr
+    return pt
   }
 }

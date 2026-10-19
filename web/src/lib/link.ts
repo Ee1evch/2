@@ -1,17 +1,33 @@
 // Соединение с ПК: вход (сопряжение или ключ устройства), шифрованный канал, состояние, переподключение.
+//
+// Пути до ПК (в порядке предпочтения, с перекрывающимся стартом — кто первым ответит):
+//   1. локальная сеть — WebSocket напрямую;
+//   2. ретранслятор — когда телефон и ПК в разных сетях (мобильный интернет, другой Wi-Fi);
+//   3. Bluetooth — без Wi-Fi и интернета (нативный мост Android).
+// Поверх любого пути поднимается прямой WebRTC (UDP, сквозь NAT); движения идут по нему без очереди.
+// Пока связь идёт через ретранслятор или Bluetooth, телефон проверяет локальную сеть и при первой
+// возможности незаметно переходит на неё.
+
 import { signal, type Signal } from '@preact/signals'
 import { b64, random, unb64, utf8 } from './b64'
 import { authMac, Channel, ctEq, deviceKey, PairKeys, pairMac, pairTranscript } from './crypto'
-import { moveFrame, OP, pingFrame, scrollFrame } from './proto'
+import { nextJson, relayPhoneUrl, wsPipe, type Pipe, type Via } from './pipe'
+import { moveTFrame, OP, pingFrame, scrollFrame } from './proto'
+import { RtcLink, rtcSupported, type IceServer, type SessionKeys } from './rtc'
+
+export type { Via } from './pipe'
 
 export interface Perms { input: boolean; media: boolean; power: boolean; macros: boolean; clipboard: boolean; files: boolean }
 
+/** Как ещё можно добраться до ПК, кроме локальной сети. */
+export interface Routes { relay?: { url: string; room: string } | null; bt?: string | null; ice?: IceServer[] }
+
 /** Сопряжённый ПК, хранится на телефоне. */
-export interface SavedPc { pc: string; name: string; device: string; key: string; hosts: string[]; port: number; at: number }
+export interface SavedPc { pc: string; name: string; device: string; key: string; hosts: string[]; port: number; at: number; routes?: Routes }
 
 export type Auth =
   | { kind: 'device'; saved: SavedPc }
-  | { kind: 'qr'; secret: string; name?: string }
+  | { kind: 'qr'; secret: string; name?: string; routes?: Routes }
   | { kind: 'pin'; pin: string }
   | { kind: 'admin'; token: string }
 
@@ -41,25 +57,6 @@ export function deviceName(): string {
   return 'Браузер'
 }
 
-function opened(ws: WebSocket, ms: number): Promise<void> {
-  return new Promise((res, rej) => {
-    const t = setTimeout(() => { ws.close(); rej(new Error('timeout')) }, ms)
-    ws.onopen = () => { clearTimeout(t); res() }
-    ws.onerror = () => { clearTimeout(t); rej(new Error('unreachable')) }
-  })
-}
-
-function nextJson(ws: WebSocket, ms = 8000): Promise<any> {
-  return new Promise((res, rej) => {
-    const t = setTimeout(() => rej(new Error('timeout')), ms)
-    ws.onmessage = (e) => {
-      clearTimeout(t)
-      try { res(JSON.parse(typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data))) } catch (err) { rej(err) }
-    }
-    ws.onclose = () => { clearTimeout(t); rej(new Error('closed')) }
-  })
-}
-
 /** Быстрая проверка адресов: первый ответивший с нужным id. */
 export async function probe(hosts: string[], port: number, pc?: string, ms = 2500): Promise<string> {
   const ctl = new AbortController()
@@ -75,6 +72,28 @@ export async function probe(hosts: string[], port: number, pc?: string, ms = 250
   } finally { clearTimeout(t); ctl.abort() }
 }
 
+/** Попытки с перекрывающимся стартом: следующая начинается, если предыдущая молчит `delay` мс.
+ *  Побеждает первая удачная, остальные закрываются. */
+async function race(tries: [number, () => Promise<Pipe>][]): Promise<Pipe> {
+  if (!tries.length) throw new Error('no-route')
+  return new Promise((res, rej) => {
+    let won = false, left = tries.length, first: unknown = null
+    for (const [delay, f] of tries) {
+      setTimeout(() => {
+        if (won) return
+        f().then((p) => {
+          if (won) { p.close(); return }
+          won = true
+          res(p)
+        }, (e) => {
+          first ??= e
+          if (--left === 0 && !won) rej(first)
+        })
+      }, delay)
+    }
+  })
+}
+
 type Listener = (m: any) => void
 
 export class Link {
@@ -82,25 +101,38 @@ export class Link {
   readonly rtt = signal(0)
   readonly perms = signal<Perms | null>(null)
   readonly error = signal<string | null>(null)
+  /** Где ПК: «ip:port» в сети, адрес ретранслятора или Bluetooth. */
   readonly host = signal<string>('')
+  readonly via = signal<Via | null>(null)
+  /** Поднят прямой канал WebRTC. */
+  readonly p2p = signal(false)
   readonly pcName = signal<string>('')
   readonly pcId = signal<string>('')
+  /** Открыть канал Bluetooth до ПК — задаёт нативная часть APK. */
+  btOpener: ((addr: string) => Promise<Pipe>) | null = null
+
   private readonly keys = new Map<string, Signal<any>>()
   private readonly listeners = new Map<string, Set<Listener>>()
-  private ws: WebSocket | null = null
+  private pipe: Pipe | null = null
   private chan: Channel | null = null
+  private session: SessionKeys | null = null
+  private rtc: RtcLink | null = null
+  private rtcRetry = 0
   private auth: Auth | null = null
   private hosts: string[] = []
   private retry = 0
   private retryTimer = 0
   private pingTimer = 0
+  private lanTimer = 0
   private pings = new Map<number, number>()
   private waiters = new Map<number, () => void>()
   private lastRttReport = 0
   private closedByUs = false
+  private switching = false
   // склейка движения, если сеть не успевает
   private pendX = 0
   private pendY = 0
+  private pendT = 0
   private flushTimer = 0
 
   /** Сигнал ключа состояния ПК: vol, media, sys, win, clip, timer, macros, pc, art… */
@@ -119,7 +151,7 @@ export class Link {
 
   private emit(type: string, m: any) { this.listeners.get(type)?.forEach((f) => f(m)) }
 
-  /** Подключиться. `hosts` — «ip:port» кандидаты; для страницы с ПК — location.host. */
+  /** Подключиться. `hosts` — «ip:port» кандидаты в локальной сети; для страницы с ПК — location.host. */
   async connect(auth: Auth, hosts: string[]): Promise<void> {
     this.auth = auth
     this.hosts = hosts
@@ -132,8 +164,10 @@ export class Link {
     this.closedByUs = true
     clearTimeout(this.retryTimer)
     clearInterval(this.pingTimer)
-    this.ws?.close()
-    this.ws = null
+    clearInterval(this.lanTimer)
+    this.rtc?.close()
+    this.pipe?.close()
+    this.pipe = null
     this.status.value = 'idle'
   }
 
@@ -143,24 +177,54 @@ export class Link {
       clearTimeout(this.retryTimer)
       this.retry = 0
       void this.attempt().catch(() => {})
+    } else if (this.status.value === 'online' && this.via.value !== 'lan') void this.tryLan()
+  }
+
+  private routes(): Routes | undefined {
+    const a = this.auth
+    return a?.kind === 'device' ? a.saved.routes : a?.kind === 'qr' ? a.routes : undefined
+  }
+
+  /** Все пути до ПК для текущего входа. */
+  private tries(): [number, () => Promise<Pipe>][] {
+    const auth = this.auth!
+    const out: [number, () => Promise<Pipe>][] = []
+    if (this.hosts.length) {
+      out.push([0, async () => {
+        let host = this.hosts[0]
+        if (this.hosts.length > 1 || auth.kind === 'device') {
+          const port = auth.kind === 'device' ? auth.saved.port : 47800
+          host = await probe(this.hosts, port, auth.kind === 'device' ? auth.saved.pc : undefined)
+        }
+        return wsPipe(`ws://${host}/ws`, 'lan', host)
+      }])
     }
+    // PIN и дашборд — только в локальной сети: короткий PIN нельзя доверять чужому серверу
+    if (auth.kind === 'device' || auth.kind === 'qr') {
+      const r = this.routes()
+      if (r?.relay?.url && r.relay.room) {
+        const relay = r.relay
+        out.push([this.hosts.length ? 900 : 0, () => wsPipe(relayPhoneUrl(relay.url, relay.room), 'relay', new URL(relayPhoneUrl(relay.url, relay.room)).host, 6000)])
+      }
+      if (r?.bt && this.btOpener) {
+        const open = this.btOpener, addr = r.bt
+        out.push([this.hosts.length ? 1800 : 0, () => open(addr)])
+      }
+    }
+    return out
   }
 
   private async attempt(): Promise<void> {
     const auth = this.auth!
     this.status.value = 'connecting'
     try {
-      let host = this.hosts[0]
-      if (this.hosts.length > 1 || auth.kind === 'device') {
-        const port = auth.kind === 'device' ? auth.saved.port : 47800
-        host = await probe(this.hosts, port, auth.kind === 'device' ? auth.saved.pc : undefined)
-      }
-      await this.handshake(auth, host)
+      const pipe = await race(this.tries())
+      await this.handshake(auth, pipe)
       this.retry = 0
       this.error.value = null
     } catch (e) {
       this.status.value = 'offline'
-      const code = e instanceof AuthError ? e.code : (e as Error).message
+      const code = e instanceof AuthError ? e.code : e instanceof AggregateError ? 'unreachable' : (e as Error).message || 'unreachable'
       this.error.value = code
       // ошибки входа не лечатся повтором: нужен новый QR/PIN или ключ отозван
       if (e instanceof AuthError) {
@@ -179,96 +243,134 @@ export class Link {
     this.retryTimer = window.setTimeout(() => void this.attempt().catch(() => {}), delay)
   }
 
-  private async handshake(auth: Auth, host: string) {
-    const ws = new WebSocket(`ws://${host}/ws`)
-    ws.binaryType = 'arraybuffer'
-    await opened(ws, 4000)
+  /** Связь через ретранслятор или Bluetooth, а ПК снова виден в сети — переходим без разрыва. */
+  private async tryLan() {
+    const auth = this.auth
+    if (this.switching || auth?.kind !== 'device' || this.via.value === 'lan' || !this.hosts.length) return
+    this.switching = true
+    try {
+      const host = await probe(this.hosts, auth.saved.port, auth.saved.pc, 1500)
+      const pipe = await wsPipe(`ws://${host}/ws`, 'lan', host, 2500)
+      await this.handshake(this.auth as Auth, pipe)
+    } catch { /* сети по-прежнему нет */ } finally { this.switching = false }
+  }
+
+  private async handshake(auth: Auth, pipe: Pipe) {
     const nc = random(16)
     let chan: Channel | null = null
+    let keys: SessionKeys | null = null
     let pc: any
     try {
       if (auth.kind === 'admin') {
-        ws.send(JSON.stringify({ t: 'hello', v: 1, role: 'admin', token: auth.token }))
-        const w = await nextJson(ws)
+        pipe.send(JSON.stringify({ t: 'hello', v: 1, role: 'admin', token: auth.token }))
+        const w = await nextJson(pipe)
         if (w.t !== 'welcome') throw new AuthError(w.code || 'protocol')
         pc = w.pc
       } else if (auth.kind === 'device') {
         const dk = unb64(auth.saved.key)
-        ws.send(JSON.stringify({ t: 'hello', v: 1, role: 'remote', device: auth.saved.device, nonce: b64(nc), name: deviceName() }))
-        const ch = await nextJson(ws)
+        pipe.send(JSON.stringify({ t: 'hello', v: 1, role: 'remote', device: auth.saved.device, nonce: b64(nc), name: deviceName() }))
+        const ch = await nextJson(pipe)
         if (ch.t !== 'challenge') throw new AuthError(ch.code || 'protocol')
         const ns = unb64(ch.nonce)
-        ws.send(JSON.stringify({ t: 'auth', mac: b64(authMac(dk, 'c', nc, ns)) }))
-        const w = await nextJson(ws)
+        pipe.send(JSON.stringify({ t: 'auth', mac: b64(authMac(dk, 'c', nc, ns)) }))
+        const w = await nextJson(pipe)
         if (w.t !== 'welcome') throw new AuthError(w.code || 'protocol')
         if (!ctEq(unb64(w.mac), authMac(dk, 's', nc, ns))) throw new AuthError('server-proof')
         chan = new Channel(dk, nc, ns)
+        keys = { dk, nc, ns }
         pc = w.pc
         this.perms.value = w.perms
-        this.remember({ ...auth.saved, hosts: mergeHosts(host, auth.saved.hosts), name: pc.name, at: Date.now() })
+        const hosts = pipe.via === 'lan' ? mergeHosts(pipe.where, auth.saved.hosts) : auth.saved.hosts
+        this.remember({ ...auth.saved, hosts, name: pc.name, at: Date.now() })
       } else {
-        const keys = new PairKeys()
-        ws.send(JSON.stringify({ t: 'hello', v: 1, role: 'remote', pair: auth.kind, pub: b64(keys.public), nonce: b64(nc), name: deviceName() }))
-        const ch = await nextJson(ws)
+        const pk = new PairKeys()
+        pipe.send(JSON.stringify({ t: 'hello', v: 1, role: 'remote', pair: auth.kind, pub: b64(pk.public), nonce: b64(nc), name: deviceName() }))
+        const ch = await nextJson(pipe)
         if (ch.t !== 'pair-challenge') throw new AuthError(ch.code || 'protocol')
         const pubS = unb64(ch.pub), ns = unb64(ch.nonce)
-        const z = keys.shared(pubS)
-        const t = pairTranscript(keys.public, pubS, nc, ns)
+        const z = pk.shared(pubS)
+        const t = pairTranscript(pk.public, pubS, nc, ns)
         const secret = auth.kind === 'pin' ? utf8(auth.pin) : unb64(auth.secret)
-        ws.send(JSON.stringify({ t: 'pair-proof', mac: b64(pairMac(secret, 'c', t, z)) }))
-        const r = await nextJson(ws)
+        pipe.send(JSON.stringify({ t: 'pair-proof', mac: b64(pairMac(secret, 'c', t, z)) }))
+        const r = await nextJson(pipe)
         if (r.t !== 'paired') throw new AuthError(r.code || 'protocol')
         if (!ctEq(unb64(r.mac), pairMac(secret, 's', t, z))) throw new AuthError('server-proof')
         const dk = deviceKey(z, secret, t)
         chan = new Channel(dk, nc, ns)
+        keys = { dk, nc, ns }
         pc = r.pc
         this.perms.value = r.perms
-        const saved: SavedPc = { pc: pc.id, name: pc.name, device: r.device, key: b64(dk), hosts: mergeHosts(host, this.hosts), port: Number(host.split(':')[1] || 47800), at: Date.now() }
+        const port = pipe.via === 'lan' ? Number(pipe.where.split(':')[1] || 47800) : 47800
+        const hosts = pipe.via === 'lan' ? mergeHosts(pipe.where, this.hosts) : this.hosts
+        const saved: SavedPc = { pc: pc.id, name: pc.name, device: r.device, key: b64(dk), hosts, port, at: Date.now(), routes: auth.kind === 'qr' ? auth.routes : undefined }
         this.remember(saved)
         // дальше переподключаемся уже по ключу устройства
         this.auth = { kind: 'device', saved }
       }
     } catch (e) {
-      ws.close()
+      pipe.close()
       throw e
     }
-    this.ws?.close()
-    this.ws = ws
+    // новый путь готов — старый закрываем (переход с ретранслятора на локальную сеть и т. п.)
+    const old = this.pipe
+    this.pipe = pipe
+    old?.close()
+    this.rtc?.close()
+    this.rtc = null
+    this.rtcRetry = 0
     this.chan = chan
-    this.host.value = host
+    this.session = keys
+    this.host.value = pipe.where
+    this.via.value = pipe.via
     this.pcName.value = pc?.name || ''
     this.pcId.value = pc?.id || ''
-    ws.onmessage = (e) => this.onMessage(e)
-    ws.onclose = () => this.onClose(ws)
-    ws.onerror = () => {}
+    pipe.onmessage = (d) => this.onPipe(d)
+    pipe.onclose = () => this.onClose(pipe)
     this.status.value = 'online'
     clearInterval(this.pingTimer)
     this.pingTimer = window.setInterval(() => this.ping(), 2000)
     this.ping()
+    clearInterval(this.lanTimer)
+    if (pipe.via !== 'lan') this.lanTimer = window.setInterval(() => void this.tryLan(), 15_000)
   }
 
   private remember(p: SavedPc) {
     saveSaved([p, ...loadSaved().filter((x) => x.pc !== p.pc)])
   }
 
-  private onClose(ws: WebSocket) {
-    if (ws !== this.ws) return
-    this.ws = null
+  /** ПК сообщил актуальные маршруты — запоминаем: пригодятся, когда сеть сменится. */
+  private learnRoutes(r: any) {
+    const a = this.auth
+    if (a?.kind !== 'device' || !r) return
+    const port = Number(r.port) || a.saved.port
+    const lan: string[] = Array.isArray(r.lan) ? r.lan.map((ip: string) => `${ip}:${port}`) : []
+    const routes: Routes = { relay: r.relay || null, bt: typeof r.bt === 'string' ? r.bt : null, ice: Array.isArray(r.ice) ? r.ice : [] }
+    const hosts = [...new Set([...(this.via.value === 'lan' ? [this.host.value] : []), ...lan, ...a.saved.hosts])].slice(0, 8)
+    const saved = { ...a.saved, hosts, port, routes }
+    a.saved = saved
+    this.hosts = [...new Set([...this.hosts, ...lan])]
+    this.remember(saved)
+  }
+
+  private onClose(pipe: Pipe) {
+    if (pipe !== this.pipe) return
+    this.pipe = null
+    this.rtc?.close()
+    this.rtc = null
     clearInterval(this.pingTimer)
+    clearInterval(this.lanTimer)
     if (this.closedByUs) return
     this.status.value = 'offline'
     this.scheduleRetry()
   }
 
-  private onMessage(e: MessageEvent) {
-    let data: Uint8Array
-    if (typeof e.data === 'string') data = utf8(e.data)
-    else {
-      const raw = new Uint8Array(e.data as ArrayBuffer)
-      const p = this.chan ? this.chan.open(raw) : raw
-      if (!p) return
-      data = p
-    }
+  private onPipe(d: string | Uint8Array) {
+    if (typeof d === 'string') { this.onPlain(utf8(d)); return }
+    const p = this.chan ? this.chan.open(d) : d
+    if (p) this.onPlain(p)
+  }
+
+  private onPlain(data: Uint8Array) {
     if (data[0] === OP.PING) {
       const t = new DataView(data.buffer, data.byteOffset).getUint32(1, true)
       const w = this.waiters.get(t)
@@ -285,17 +387,23 @@ export class Link {
       }
       return
     }
-    if (data[0] !== 0x7b) return
+    if (data[0] !== 0x7b) { this.emit('bin', data); return }
     const m = JSON.parse(new TextDecoder().decode(data))
     switch (m.t) {
       case 'snapshot':
         for (const [k, v] of Object.entries(m.v)) this.get(k).value = v
+        if (m.v.routes) this.learnRoutes(m.v.routes)
+        this.upgrade()
         break
       case 'state':
         this.get(m.k).value = m.v
+        if (m.k === 'routes') this.learnRoutes(m.v)
         break
       case 'perms':
         this.perms.value = m.v
+        break
+      case 'rtc-answer': case 'rtc-ice': case 'rtc-failed':
+        void this.rtc?.onSignal(m)
         break
       case 'error':
         if (m.code === 'revoked' && this.auth?.kind === 'device') {
@@ -311,6 +419,22 @@ export class Link {
         this.emit(m.t, m)
     }
     this.emit('*', m)
+  }
+
+  /** Прямой канал WebRTC поверх открытой сессии. Не вышло — всё работает по основному пути. */
+  private upgrade() {
+    if (this.rtc || !this.session || !rtcSupported() || this.auth?.kind !== 'device') return
+    const ice = (this.routes()?.ice || []).filter((s) => s.urls?.length)
+    const rtc = new RtcLink(this.session, ice, (m) => this.jsonPipe(m), (p) => this.onPlain(p), (open) => {
+      if (this.rtc !== rtc) return
+      this.p2p.value = open
+      if (open) { this.rtcRetry = 0; this.ping(); return }
+      this.rtc = null
+      // пропал или не поднялся — повторим позже, пока сессия жива
+      if (this.pipe && this.rtcRetry < 3) setTimeout(() => { if (this.status.value === 'online') this.upgrade() }, 10_000 * 2 ** this.rtcRetry++)
+    })
+    this.rtc = rtc
+    void rtc.start().catch(() => rtc.close())
   }
 
   private ping() {
@@ -335,45 +459,65 @@ export class Link {
     return out
   }
 
-  get online() { return this.status.value === 'online' && !!this.ws }
+  get online() { return this.status.value === 'online' && !!this.pipe }
 
-  /** Отправить бинарный кадр (шифруется, если канал есть). */
+  private sealPipe(b: Uint8Array): boolean {
+    const p = this.pipe
+    if (!p) return false
+    return p.send(this.chan ? this.chan.seal(b) : b)
+  }
+
+  /** Отправить бинарный кадр надёжно: по WebRTC «ctl», если он открыт, иначе основным путём. */
   raw(b: Uint8Array): boolean {
-    const ws = this.ws
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false
-    ws.send(this.chan ? this.chan.seal(b) : b)
-    return true
+    if (this.rtc?.sendCtl(b)) return true
+    return this.sealPipe(b)
+  }
+
+  /** Крупные кадры и потоки, где важен порядок (видео экрана), — всегда основным путём. */
+  bulk(b: Uint8Array): boolean {
+    return this.sealPipe(b)
   }
 
   json(v: unknown): boolean {
     const b = utf8(JSON.stringify(v))
-    if (!this.chan && this.ws?.readyState === WebSocket.OPEN) { this.ws.send(new TextDecoder().decode(b)); return true }
+    if (!this.chan && this.pipe) return this.pipe.send(new TextDecoder().decode(b))
     return this.raw(b)
   }
 
-  /** Движение курсора в пикселях (дробные копятся). Если сеть не успевает — склеиваем. */
-  move(dx: number, dy: number) {
+  /** Сигналинг WebRTC — только основным путём. */
+  private jsonPipe(v: unknown): boolean {
+    return this.sealPipe(utf8(JSON.stringify(v)))
+  }
+
+  /** Сколько можно потерять, но нельзя задержать: движение. Очередь полна — склеиваем со следующим. */
+  private congested(): boolean {
+    if (this.rtc?.open) return this.rtc.fastBusy()
+    return (this.pipe?.buffered() ?? 0) > 2048
+  }
+
+  /** Движение курсора в пикселях (дробные копятся); `t` — время касания для плавного проигрывания на ПК. */
+  move(dx: number, dy: number, t: number = performance.now()) {
     this.pendX += dx * 4
     this.pendY += dy * 4
+    this.pendT = t
     if (this.flushTimer) return
     // все движения одного события (coalesced) уходят одним кадром; если сеть не успевает — чуть позже
     this.flushTimer = -1
-    queueMicrotask(() => {
-      if ((this.ws?.bufferedAmount ?? 0) > 2048) {
-        this.flushTimer = window.setTimeout(() => { this.flushTimer = 0; this.flushMove() }, 6)
-        return
-      }
-      this.flushTimer = 0
-      this.flushMove()
-    })
+    queueMicrotask(() => this.flushMove())
   }
 
   private flushMove() {
+    if (this.congested()) {
+      this.flushTimer = window.setTimeout(() => this.flushMove(), 6)
+      return
+    }
+    this.flushTimer = 0
     const qx = Math.trunc(this.pendX), qy = Math.trunc(this.pendY)
     if (!qx && !qy) return
     const cx = Math.max(-32767, Math.min(32767, qx)), cy = Math.max(-32767, Math.min(32767, qy))
     this.pendX -= cx; this.pendY -= cy
-    this.raw(moveFrame(cx, cy))
+    const f = moveTFrame(cx, cy, this.pendT)
+    if (!this.rtc?.sendFast(f)) this.sealPipe(f)
   }
 
   scroll(v: number, h: number) {
@@ -391,18 +535,23 @@ export class Link {
 }
 
 function mergeHosts(first: string, rest: string[]): string[] {
-  return [first, ...rest.filter((h) => h !== first)].slice(0, 6)
+  return [first, ...rest.filter((h) => h !== first)].slice(0, 8)
 }
 
-/** Разбор ссылки из QR: http://ip:port/#pair=…&pc=…&h=ip1,ip2&n=имя */
-export function parsePairUrl(url: string): { secret: string; pc: string; hosts: string[]; port: number; name: string } | null {
+export interface PairLink { secret: string; pc: string; hosts: string[]; port: number; name: string; routes: Routes }
+
+/** Разбор ссылки из QR (v2): http://ip:port/#v=2&pair=…&pc=…&h=ip1,ip2&p=порт&n=имя&r=ретранслятор&rm=комната&bt=адрес */
+export function parsePairUrl(url: string): PairLink | null {
   try {
     const u = new URL(url)
     const q = new URLSearchParams(u.hash.slice(1))
     const secret = q.get('pair')
     if (!secret) return null
-    const port = Number(u.port || 80)
-    const hosts = [u.host, ...(q.get('h') || '').split(',').filter(Boolean).map((h) => `${h}:${port}`)]
-    return { secret, pc: q.get('pc') || '', hosts: [...new Set(hosts)], port, name: q.get('n') || '' }
+    const port = Number(q.get('p') || u.port || 80)
+    const own = u.protocol === 'http:' && u.hostname ? [`${u.hostname}:${u.port || 80}`] : []
+    const hosts = [...own, ...(q.get('h') || '').split(',').filter(Boolean).map((h) => `${h}:${port}`)]
+    const relay = q.get('r') && q.get('rm') ? { url: q.get('r')!, room: q.get('rm')! } : null
+    const bt = q.get('bt')
+    return { secret, pc: q.get('pc') || '', hosts: [...new Set(hosts)], port, name: q.get('n') || '', routes: { relay, bt: bt && bt !== '1' ? bt : null } }
   } catch { return null }
 }

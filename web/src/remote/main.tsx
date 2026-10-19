@@ -36,7 +36,7 @@ function App() {
     if (pair) {
       // открыто системной камерой по QR с экрана ПК
       history.replaceState(null, '', location.pathname)
-      link.connect({ kind: 'qr', secret: pair.secret }, servedFromPc ? [...new Set([location.host, ...pair.hosts])] : pair.hosts)
+      link.connect({ kind: 'qr', secret: pair.secret, routes: pair.routes }, servedFromPc ? [...new Set([location.host, ...pair.hosts])] : pair.hosts)
         .then(() => setView('main'), (e) => { setErr(explain(e)); setView('connect') })
       return
     }

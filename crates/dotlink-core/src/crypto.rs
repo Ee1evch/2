@@ -194,6 +194,8 @@ pub(crate) mod tests {
         assert_eq!(hex(&dk), VEC_DK);
         assert_eq!(hex(&auth), VEC_AUTH);
         assert_eq!(hex(&frame), VEC_FRAME);
+        let mut fast = Channel::labeled(&dk, &nc, &ns, false, LABEL_RTC_FAST, true);
+        assert_eq!(hex(&fast.seal(&[9, 4, 0, 0xFC, 0xFF, 0x10, 0, 0, 0])), VEC_FAST);
     }
 
     const VEC_Z: &str = "2ed76ab549b1e73c031eb49c9448f0798aea81b698279a0c3dc3e49fbfc4b953";
@@ -201,6 +203,7 @@ pub(crate) mod tests {
     const VEC_DK: &str = "14bf51f0058e34ced8e9811ee1194801fc34c9d79111a6dbb6139d0621ded049";
     const VEC_AUTH: &str = "b0244b6bac8fcd2e61ed69003987799e2f7f37a6a084fa52ee4502295cc95e21";
     const VEC_FRAME: &str = "0100000000000000e318bcf24df085aa8e046f583b812bd470eda7ab5d";
+    const VEC_FAST: &str = "01000000000000000aea09aeda947ee931af40f36f7bf8b022fb67ee9bf974b7b2";
 
     #[test]
     fn channel_roundtrip_and_replay() {

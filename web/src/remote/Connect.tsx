@@ -71,7 +71,7 @@ export function Connect({ error, onDone }: { error?: string | null; onDone: () =
   const viaQr = (text: string) => {
     const p = parsePairUrl(text)
     if (!p) { setErr('Это не QR DotLink'); return }
-    void run('qr', () => link.connect({ kind: 'qr', secret: p.secret }, p.hosts))
+    void run('qr', () => link.connect({ kind: 'qr', secret: p.secret, routes: p.routes }, p.hosts))
   }
   const pick = (f: FoundPc) => {
     const host = `${f.host}:${f.port}`
