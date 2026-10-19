@@ -242,9 +242,8 @@ function App() {
   const [tab, setTab] = useState<Tab>('overview')
   useEffect(() => {
     if (!token) return
+    // если ядро перезапустится, Link переподключится сам
     void link.connect({ kind: 'admin', token }, [location.host]).catch(() => {})
-    // ядро могло перезапуститься — дашборд переподключается сам
-    const t = setInterval(() => { if (link.status.value === 'offline') void link.connect({ kind: 'admin', token }, [location.host]).catch(() => {}) }, 3000)
     let known = -1
     const off = link.on('*', (m) => {
       if (m.t === 'state' && m.k === 'devices') {
@@ -255,7 +254,7 @@ function App() {
       if (m.t === 'snapshot') known = (m.v.devices || []).length
       if (m.t === 'state' && m.k === 'received' && m.v[0] && Date.now() - m.v[0].at < 5000) toast(`Принят файл «${m.v[0].name}»`)
     })
-    return () => { clearInterval(t); off() }
+    return off
   }, [])
 
   if (!token) return (
