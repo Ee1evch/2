@@ -96,6 +96,7 @@ describe('DotLink e2e: разные сети', () => {
     // вернулись в приложение — телефон проверяет сеть (и сам раз в 15 с)
     await phone.evaluate(() => dispatchEvent(new Event('focus')))
     await phone.getByText(/^Wi-Fi/).waitFor({ timeout: 15_000 })
-    await phone.getByText(`127.0.0.1:${port}`).waitFor()
+    // адрес — любой из адресов ПК в сети (на машине с настоящей сетью это может быть не 127.0.0.1)
+    await phone.getByText(new RegExp(`:${port}$`)).waitFor()
   })
 })
