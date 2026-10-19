@@ -1,0 +1,77 @@
+html, body { height:100%; overscroll-behavior:none; }
+body { -webkit-user-select:none; user-select:none; }
+input, textarea, .clip-text { -webkit-user-select:text; user-select:text; }
+.small { font-size:12px; }
+.r-boot { min-height:100dvh; background:var(--bg); }
+
+/* ───────── каркас ───────── */
+.r-app { min-height:100dvh; display:flex; flex-direction:column; }
+.r-head { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:12px; padding:calc(12px + var(--safe-t)) 18px 10px;
+  background:linear-gradient(var(--bg) 72%, color-mix(in srgb, var(--bg) 0%, transparent)); }
+.r-title { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.r-title b { font:800 22px/1.1 var(--display); letter-spacing:-.02em; }
+.r-main { flex:1; padding:4px 12px calc(100px + var(--safe-b)); }
+.r-tabs { position:fixed; left:12px; right:12px; bottom:calc(10px + var(--safe-b)); z-index:20; max-width:520px; margin:0 auto; }
+.home-grid { --cols:2; max-width:640px; margin:0 auto; }
+@media (min-width:700px) { .home-grid { --cols:4; max-width:980px; } }
+
+/* ───────── виджеты ───────── */
+.vol-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.media-row { display:flex; gap:14px; align-items:center; min-width:0; }
+.media-txt { display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; }
+.media-title { font-size:16px; }
+.media-prog { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.media-prog span { font-size:11.5px; }
+.media-ctl { display:flex; align-items:center; justify-content:center; gap:18px; }
+.win-row { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.macro-grid { --cols:3; }
+.macro-grid .tile { min-height:84px; padding:12px; }
+.power-grid { --cols:3; }
+.kv { display:grid; grid-template-columns:auto 1fr; gap:7px 16px; margin:0; font-size:13.5px; }
+.kv dt { color:var(--muted); } .kv dd { margin:0; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ───────── тачпад ───────── */
+.tab-pad .r-main { display:flex; padding-bottom:calc(92px + var(--safe-b)); }
+.pad-view { flex:1; display:flex; flex-direction:column; gap:10px; min-height:calc(100dvh - 170px - var(--safe-t) - var(--safe-b)); }
+.pad { position:relative; flex:1; min-height:220px; border-radius:var(--r-xl); background:var(--bg-2); box-shadow:inset 0 0 0 1px var(--border); overflow:hidden; touch-action:none; -webkit-touch-callout:none; }
+.pad-hint { position:absolute; left:0; right:0; bottom:16px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11.5px; color:var(--faint); pointer-events:none; }
+.pad-btns { display:grid; grid-template-columns:1fr 64px 1fr; gap:8px; height:64px; flex:none; }
+.pad-btn { display:grid; place-items:center; border-radius:var(--r-l); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); color:var(--muted); font-size:18px; touch-action:none; transition:transform .15s var(--spring), background .12s, color .12s; }
+.pad-btn.is-down { transform:scale(.96); background:var(--text); color:var(--bg); }
+.pad-btn.kb.on { background:var(--accent); color:var(--on-accent); box-shadow:none; }
+
+/* ───────── клавиатура ───────── */
+.kbd { display:flex; flex-direction:column; gap:7px; padding:10px; border-radius:var(--r-l); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); animation:rise .3s var(--ease); }
+.kbd-input { height:48px; font-size:16px; }
+.kbd-row { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; padding-bottom:2px; }
+.kbd-row::-webkit-scrollbar { display:none; }
+.kbd-row.wrap { flex-wrap:wrap; }
+.kbd-row .key { flex:1 0 auto; min-width:46px; }
+
+/* ───────── файлы и буфер ───────── */
+.up-row { display:grid; grid-template-columns:1fr auto; gap:4px 10px; align-items:center; min-width:0; }
+.up-row .dmeter { grid-column:1 / -1; }
+.up-row .grow { display:flex; flex-direction:column; min-width:0; }
+.clip-box { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:12px; border-radius:var(--r-m); background:var(--surface-2); }
+.clip-text { margin:0; max-height:120px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:13.5px; align-self:stretch; }
+
+/* ───────── подключение ───────── */
+.connect { max-width:520px; margin:0 auto; padding:0 16px calc(32px + var(--safe-b)); display:flex; flex-direction:column; gap:22px; }
+.connect-hero { position:relative; margin:0 -16px; padding:calc(56px + var(--safe-t)) 20px 30px; min-height:300px; overflow:hidden; }
+.connect-hero-in { position:relative; display:flex; flex-direction:column; gap:14px; }
+.connect-hero .title { font-size:40px; }
+.pc-row { display:flex; align-items:center; gap:14px; width:100%; padding:14px 16px; border-radius:var(--r-m); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); text-align:left; transition:transform .2s var(--spring), background .15s; }
+.pc-row:active { transform:scale(.98); }
+.pc-row .grow { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.pc-row small { color:var(--muted); font-size:12px; }
+.pc-row .dl-icon { color:var(--muted); }
+.note { display:flex; flex-direction:column; gap:6px; padding:14px 16px; border-radius:var(--r-m); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); font-size:13.5px; }
+.note ol { margin:0; padding-left:18px; color:var(--muted); display:flex; flex-direction:column; gap:4px; }
+.note.err { flex-direction:row; align-items:center; gap:10px; color:var(--accent-hi); background:var(--accent-soft); box-shadow:inset 0 0 0 1px var(--accent-line); }
+.pin-box { position:relative; display:grid; place-items:center; padding:18px 0; border-radius:var(--r-m); background:var(--surface-2); }
+.pin-input { position:absolute; inset:0; opacity:0; font-size:16px; }
+
+/* плитки в узких сетках: подпись в две строки с переносами вместо обрезки */
+.macro-grid .tile .t-label, .power-grid .tile .t-label { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; font-size:12.5px; hyphens:auto; overflow-wrap:break-word; }
+.power-grid .tile, .macro-grid .tile { gap:10px; }
+.pad-btn .dot { font-size:26px; }

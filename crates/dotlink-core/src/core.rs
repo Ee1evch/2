@@ -322,7 +322,7 @@ impl Core {
 
     fn publish_timer(&self) {
         let v = match &*self.timer.lock() {
-            Some(t) => json!({ "action": t.action, "ends_at": t.ends_at, "total": t.total }),
+            Some(t) => json!({ "action": t.action, "ends_at": t.ends_at, "total": t.total, "now": now_ms() }),
             None => Value::Null,
         };
         self.hub.set("timer", v);

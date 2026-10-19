@@ -1,0 +1,13 @@
+.qr-full { position:fixed; inset:0; z-index:80; display:flex; flex-direction:column; background:#fff; animation:fade .2s var(--ease); }
+.qr-full.dark { background:#000; }
+.qr-canvas { flex:1; width:100%; min-height:0; display:block; image-rendering:pixelated; }
+.qr-video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.qr-aim { position:absolute; inset:12% 10% 34%; pointer-events:none; }
+.qr-aim i { position:absolute; width:34px; height:34px; border:3px dotted var(--accent); }
+.qr-aim i:nth-child(1) { left:0; top:0; border-right:0; border-bottom:0; }
+.qr-aim i:nth-child(2) { right:0; top:0; border-left:0; border-bottom:0; }
+.qr-aim i:nth-child(3) { left:0; bottom:0; border-right:0; border-top:0; }
+.qr-aim i:nth-child(4) { right:0; bottom:0; border-left:0; border-top:0; }
+.qr-bar { position:relative; display:flex; flex-direction:column; gap:12px; padding:14px 16px calc(14px + var(--safe-b)); background:var(--bg-2); color:var(--text); box-shadow:inset 0 1px 0 var(--border-2); }
+.qr-full.dark .qr-bar { position:absolute; left:0; right:0; bottom:0; background:color-mix(in srgb, var(--bg) 86%, transparent); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); }
+.ellipsis { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

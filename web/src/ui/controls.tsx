@@ -16,7 +16,7 @@ function pressHandlers(kind: 'tick' | 'tap' = 'tick') {
 }
 
 type BtnProps = Omit<JSX.HTMLAttributes<HTMLButtonElement>, 'icon' | 'size'> & {
-  variant?: 'primary' | 'ghost' | 'danger' | 'default'; size?: 'sm' | 'md'; icon?: IconName; block?: boolean; children?: ComponentChildren
+  variant?: 'primary' | 'ghost' | 'danger' | 'default'; size?: 'sm' | 'md'; icon?: IconName; block?: boolean; disabled?: boolean; children?: ComponentChildren
 }
 export function Button({ variant = 'default', size = 'md', icon, block, children, class: cls, ...rest }: BtnProps) {
   const c = ['btn', variant !== 'default' && variant, size === 'sm' && 'sm', block && 'block', cls].filter(Boolean).join(' ')
