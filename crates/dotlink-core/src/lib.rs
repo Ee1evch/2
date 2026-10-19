@@ -1,5 +1,6 @@
 //! DotLink — управление Windows-ПК с телефона по локальной сети, без интернета.
 
+pub mod bt;
 pub mod core;
 pub mod crypto;
 pub mod discovery;
@@ -130,6 +131,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
     }
 
     relay::start(core.clone());
+    bt::start(core.clone());
 
     let disc = if opts.discovery {
         let c = core.clone();

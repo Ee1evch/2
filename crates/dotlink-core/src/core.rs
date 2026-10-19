@@ -166,10 +166,11 @@ impl Core {
         let o = self.pairing.current();
         let port = self.port();
         let addrs = crate::net::addrs();
-        let (id, name, relay, room, bt) = {
+        let (id, name, relay, room) = {
             let c = self.store.read();
-            (c.pc_id.clone(), c.pc_name.clone(), c.settings.relay_url.clone(), c.room(), c.settings.bluetooth)
+            (c.pc_id.clone(), c.pc_name.clone(), c.settings.relay_url.clone(), c.room())
         };
+        let bt = crate::bt::address(self);
         let hosts: Vec<&str> = addrs.iter().take(4).map(|a| a.ip.as_str()).collect();
         let first = hosts.first().copied().unwrap_or("127.0.0.1");
         let enc = |s: &str| percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string();
@@ -179,8 +180,8 @@ impl Core {
         if !relay.is_empty() {
             url.push_str(&format!("&r={}&rm={room}", enc(&relay)));
         }
-        if bt {
-            url.push_str("&bt=1");
+        if let Some(addr) = bt {
+            url.push_str(&format!("&bt={addr}"));
         }
         self.hub.set("pairing", json!({ "url": url, "pin": o.pin, "expires": o.expires_ms, "hosts": hosts, "port": port }));
     }
@@ -190,7 +191,8 @@ impl Core {
         let c = self.store.read();
         let relay = (!c.settings.relay_url.is_empty()).then(|| json!({ "url": c.settings.relay_url, "room": c.room() }));
         let lan: Vec<String> = crate::net::addrs().into_iter().map(|a| a.ip).collect();
-        self.hub.set("routes", json!({ "lan": lan, "port": self.port(), "relay": relay, "ice": c.settings.ice_servers, "bt": c.settings.bluetooth }));
+        let bt = crate::bt::address(self);
+        self.hub.set("routes", json!({ "lan": lan, "port": self.port(), "relay": relay, "ice": c.settings.ice_servers, "bt": bt }));
     }
 
     pub fn publish_net(&self) {

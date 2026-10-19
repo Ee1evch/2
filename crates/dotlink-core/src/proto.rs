@@ -30,6 +30,9 @@ pub mod op {
     pub const MOVE_T: u8 = 0x09;
     /// кадр видео экрана телефона: u8 флаги (1 ключевой, 2 конфигурация), u32 время в мс, u16 w, u16 h, данные H.264/VP8
     pub const MIRROR: u8 = 0x0A;
+    /// часть файла внутри сессии (через ретранслятор или Bluetooth, где нет прямого HTTP):
+    /// u8 вид (0 данные, 1 конец, 2 отмена), u8 длина билета, билет, данные
+    pub const FILE: u8 = 0x0B;
 
     // ПК → телефон: мышь ПК управляет телефоном (как Universal Control)
     /// i16 dx, i16 dy — в пикселях ПК
@@ -97,6 +100,11 @@ pub enum Frame {
     },
     /// весь кадр как есть — ядро пересылает его дашборду
     Mirror(Vec<u8>),
+    File {
+        kind: u8,
+        id: String,
+        data: Vec<u8>,
+    },
     Json(serde_json::Value),
 }
 
@@ -154,6 +162,11 @@ pub fn decode(b: &[u8]) -> Result<Frame, BadFrame> {
         op::PING => Frame::Ping(u32::from_le_bytes(b.get(1..5).ok_or(BadFrame)?.try_into().unwrap())),
         op::MOVE_T => Frame::MoveT { dx: i16_at(b, 1)?, dy: i16_at(b, 3)?, t: u32::from_le_bytes(b.get(5..9).ok_or(BadFrame)?.try_into().unwrap()) },
         op::MIRROR if b.len() > 10 => Frame::Mirror(b.to_vec()),
+        op::FILE => {
+            let n = *b.get(2).ok_or(BadFrame)? as usize;
+            let id = std::str::from_utf8(b.get(3..3 + n).ok_or(BadFrame)?).map_err(|_| BadFrame)?.to_string();
+            Frame::File { kind: b[1], id, data: b[3 + n..].to_vec() }
+        }
         op::JSON => Frame::Json(serde_json::from_slice(b).map_err(|_| BadFrame)?),
         _ => return Err(BadFrame),
     })
@@ -175,6 +188,15 @@ pub fn uc_scroll(v: i16, h: i16) -> Vec<u8> {
     b.extend_from_slice(&v.to_le_bytes());
     b.extend_from_slice(&h.to_le_bytes());
     b
+}
+
+pub fn file_frame(kind: u8, id: &str, data: &[u8]) -> Vec<u8> {
+    let id = &id.as_bytes()[..id.len().min(255)];
+    let mut v = Vec::with_capacity(3 + id.len() + data.len());
+    v.extend_from_slice(&[op::FILE, kind, id.len() as u8]);
+    v.extend_from_slice(id);
+    v.extend_from_slice(data);
+    v
 }
 
 pub fn pong(t: u32) -> Vec<u8> {
@@ -261,6 +283,10 @@ pub enum RemoteCmd {
     },
     /// курсор ПК ушёл с края экрана телефона — вернуть управление ПК
     UcExit,
+    /// скачать предложенный файл внутри сессии (когда HTTP до ПК недоступен)
+    FileGet {
+        ticket: String,
+    },
     /// WebRTC: предложение и кандидаты — внутри уже зашифрованной сессии
     RtcOffer {
         sdp: serde_json::Value,
@@ -353,6 +379,8 @@ mod tests {
         assert_eq!(decode(&[9, 4, 0, 0xFC, 0xFF, 0x10, 0, 0, 0]).unwrap(), Frame::MoveT { dx: 4, dy: -4, t: 16 });
         assert!(matches!(decode(&[0x0A, 1, 0, 0, 0, 0, 0x80, 2, 0x38, 4, 0xAA]).unwrap(), Frame::Mirror(_)));
         assert!(decode(&[0x0A, 1]).is_err());
+        assert_eq!(decode(&file_frame(0, "abc", &[1, 2])).unwrap(), Frame::File { kind: 0, id: "abc".into(), data: vec![1, 2] });
+        assert!(decode(&[0x0B, 0, 9, b'a']).is_err());
     }
 
     #[test]

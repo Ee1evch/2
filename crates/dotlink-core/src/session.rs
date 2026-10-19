@@ -218,8 +218,21 @@ impl SubPixel {
     }
 }
 
+/// Файл, который телефон присылает частями внутри сессии.
+struct Upload {
+    file: tokio::io::BufWriter<tokio::fs::File>,
+    tmp: std::path::PathBuf,
+    path: std::path::PathBuf,
+    name: String,
+    size: Option<u64>,
+    got: u64,
+    from: String,
+}
+
 struct Ctx {
     sid: u64,
+    out: mpsc::Sender<Out>,
+    uploads: std::collections::HashMap<String, Upload>,
     admin: bool,
     device: Option<String>,
     perms: Perms,
@@ -250,6 +263,7 @@ pub async fn run(core: Arc<Core>, wire: Wire) {
     let (out_tx, mut out_rx) = mpsc::channel::<Out>(512);
     let rtt = Arc::new(AtomicU32::new(0));
     let p2p = Arc::new(AtomicBool::new(false));
+    let out = out_tx.clone();
     let sid = core.register(SessionInfo {
         device: device.clone(),
         name,
@@ -264,7 +278,8 @@ pub async fn run(core: Arc<Core>, wire: Wire) {
     // подписка до снимка: ни одно изменение не потеряется
     let mut hub_rx = core.hub.subscribe();
     let mut ok = send_snapshot(&core, &mut tx, admin, &perms).await;
-    let mut ctx = Ctx { sid, admin, device, perms, keys, sub: SubPixel::default(), rtt, p2p, last_rtt_publish: 0, rtc_rx: None };
+    let mut ctx =
+        Ctx { sid, out, uploads: Default::default(), admin, device, perms, keys, sub: SubPixel::default(), rtt, p2p, last_rtt_publish: 0, rtc_rx: None };
 
     while ok {
         tokio::select! {
@@ -314,6 +329,9 @@ pub async fn run(core: Arc<Core>, wire: Wire) {
     }
     if let Some(r) = tx.rtc.take() {
         r.close().await;
+    }
+    for (_, u) in ctx.uploads.drain() {
+        let _ = tokio::fs::remove_file(&u.tmp).await;
     }
     core.motion.forget(sid);
     core.unregister(sid);
@@ -403,6 +421,12 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
             }
             core.set_volume_from(level as f32 / 10_000.0, seq);
         }
+        Frame::File { kind, id, data } => {
+            if !ctx.perms.files {
+                return tx.json(&deny("files")).await;
+            }
+            return file_part(core, tx, ctx, kind, id, data).await;
+        }
         Frame::Mirror(frame) => {
             if let Some(d) = &ctx.device {
                 core.mirror_frame(d, frame);
@@ -416,6 +440,15 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
             let Ok(cmd) = serde_json::from_value::<RemoteCmd>(v) else { return true };
             match cmd {
                 RemoteCmd::RtcOffer { sdp } => return rtc_offer(core, tx, ctx, sdp).await,
+                RemoteCmd::FileGet { ticket } => {
+                    if !ctx.perms.files {
+                        return tx.json(&deny("files")).await;
+                    }
+                    let Some(crate::files::Ticket::Download { path, .. }) = core.files.take(&ticket) else {
+                        return tx.json(&json!({ "t": "error", "msg": "ссылка на файл устарела" })).await;
+                    };
+                    tokio::spawn(send_file(path, ticket, ctx.out.clone()));
+                }
                 RemoteCmd::RtcIce { candidate } => {
                     if let Some(r) = &tx.rtc {
                         if let Err(e) = r.add_candidate(candidate).await {
@@ -434,6 +467,96 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
         }
     }
     true
+}
+
+/// Часть файла от телефона: первая открывает файл по билету загрузки, «конец» — проверяет размер
+/// и переносит в «Загрузки». Используется, когда HTTP до ПК недоступен (ретранслятор, Bluetooth).
+async fn file_part(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, kind: u8, id: String, data: Vec<u8>) -> bool {
+    use tokio::io::AsyncWriteExt;
+    if !ctx.uploads.contains_key(&id) {
+        if kind > 1 {
+            return true;
+        }
+        let Some(crate::files::Ticket::Upload { name, size, from }) = core.files.take(&id) else {
+            return tx.json(&json!({ "t": "error", "msg": "билет на файл недействителен" })).await;
+        };
+        let dir = core.platform.downloads_dir();
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let path = crate::files::unique_path(&dir, &name);
+        let tmp = path.with_extension("dotlink-part");
+        match tokio::fs::File::create(&tmp).await {
+            Ok(f) => {
+                ctx.uploads.insert(id.clone(), Upload { file: tokio::io::BufWriter::with_capacity(1 << 20, f), tmp, path, name, size, got: 0, from });
+            }
+            Err(e) => return tx.json(&json!({ "t": "error", "msg": format!("файл: {e}") })).await,
+        }
+    }
+    let up = ctx.uploads.get_mut(&id).expect("только что добавлен");
+    up.got += data.len() as u64;
+    let res = async {
+        if up.got > up.size.unwrap_or(crate::files::MAX_UPLOAD) {
+            return Err(std::io::Error::other("файл больше заявленного"));
+        }
+        up.file.write_all(&data).await?;
+        if kind == 1 {
+            up.file.flush().await?;
+            if up.size.is_some_and(|s| s != up.got) {
+                return Err(std::io::Error::other("передача прервана"));
+            }
+            tokio::fs::rename(&up.tmp, &up.path).await?;
+        }
+        Ok(())
+    }
+    .await;
+    match (kind, res) {
+        (0, Ok(())) => true,
+        (1, Ok(())) => {
+            let up = ctx.uploads.remove(&id).expect("есть");
+            let from = core.store.device(&up.from).map(|d| d.name).unwrap_or(up.from);
+            let fname = up.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(up.name);
+            core.received(crate::files::Received {
+                name: fname.clone(),
+                size: up.got,
+                from,
+                at: crate::util::now_ms(),
+                path: up.path.to_string_lossy().into(),
+            });
+            tx.json(&json!({ "t": "ok", "for": "upload", "id": id, "name": fname })).await
+        }
+        (_, r) => {
+            let up = ctx.uploads.remove(&id).expect("есть");
+            let _ = tokio::fs::remove_file(&up.tmp).await;
+            match r {
+                Err(e) => tx.json(&json!({ "t": "error", "for": "upload", "id": id, "msg": e.to_string() })).await,
+                Ok(()) => true, // отменено телефоном
+            }
+        }
+    }
+}
+
+/// Файл с ПК частями по основному каналу сессии; очередь ограничена — память не растёт.
+async fn send_file(path: std::path::PathBuf, id: String, out: mpsc::Sender<Out>) {
+    use tokio::io::AsyncReadExt;
+    let Ok(mut f) = tokio::fs::File::open(&path).await else {
+        let _ = out.send(Out::Bulk(proto::file_frame(2, &id, &[]))).await;
+        return;
+    };
+    let mut buf = vec![0u8; 32 * 1024];
+    loop {
+        match f.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => {
+                if out.send(Out::Bulk(proto::file_frame(0, &id, &buf[..n]))).await.is_err() {
+                    return;
+                }
+            }
+            Err(_) => {
+                let _ = out.send(Out::Bulk(proto::file_frame(2, &id, &[]))).await;
+                return;
+            }
+        }
+    }
+    let _ = out.send(Out::Bulk(proto::file_frame(1, &id, &[]))).await;
 }
 
 /// Телефон предлагает прямой канал. Ключи WebRTC-каналов выводятся из ключа этой сессии.
@@ -546,7 +669,7 @@ fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Pe
             }
         }
         RemoteCmd::UcExit => core.uc_stop(),
-        RemoteCmd::RtcOffer { .. } | RemoteCmd::RtcIce { .. } => {}
+        RemoteCmd::RtcOffer { .. } | RemoteCmd::RtcIce { .. } | RemoteCmd::FileGet { .. } => {}
     }
     vec![]
 }

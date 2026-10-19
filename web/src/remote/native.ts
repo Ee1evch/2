@@ -34,6 +34,12 @@ export function onShared(fn: () => void): () => void {
   return () => { void Promise.resolve(h).then((x: any) => x?.remove?.()) }
 }
 
+/** Прочитать присланный файл целиком (для передачи внутри сессии, когда HTTP до ПК нет). */
+export async function readShared(uri: string, type: string): Promise<Blob> {
+  const r = await plugin('Filesystem').readFile({ path: uri })
+  return new Blob([unb64(r.data) as BlobPart], { type })
+}
+
 /** Загрузка присланного файла прямо из натива — без перегонки байтов через WebView. */
 export async function uploadShared(uri: string, url: string): Promise<void> {
   await plugin('DotLink').upload({ uri, url })

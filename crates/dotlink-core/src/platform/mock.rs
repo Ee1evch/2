@@ -11,6 +11,7 @@ pub struct MockPlatform {
     state: Arc<Mutex<MockState>>,
     tx: Mutex<Option<Sender<Event>>>,
     dir: PathBuf,
+    bt: Mutex<Option<BtAccept>>,
 }
 
 struct MockState {
@@ -19,6 +20,9 @@ struct MockState {
     media: MediaInfo,
     clipboard: Option<Clip>,
 }
+
+/// Концы «Bluetooth» тестового телефона: байты к ПК и от ПК.
+pub type BtTestEnds = (std::sync::mpsc::Sender<Vec<u8>>, std::sync::mpsc::Receiver<Vec<u8>>);
 
 impl Default for MockPlatform {
     fn default() -> Self {
@@ -49,6 +53,7 @@ impl MockPlatform {
             })),
             tx: Mutex::new(None),
             dir,
+            bt: Mutex::new(None),
         }
     }
 
@@ -58,6 +63,31 @@ impl MockPlatform {
             l.drain(..1000);
         }
         l.push((self.t0.elapsed().as_micros(), v));
+    }
+
+    /// «Телефон по Bluetooth» для тестов: байты туда и обратно через каналы, как через RFCOMM.
+    pub fn bt_connect(&self) -> Option<BtTestEnds> {
+        let accept = self.bt.lock().clone()?;
+        let (to_pc, from_phone) = std::sync::mpsc::channel::<Vec<u8>>();
+        let (to_phone, from_pc) = std::sync::mpsc::channel::<Vec<u8>>();
+        let mut pending: Vec<u8> = Vec::new();
+        accept(BtConn {
+            peer: "Тестовый телефон".into(),
+            read: Box::new(move |buf| {
+                if pending.is_empty() {
+                    match from_phone.recv() {
+                        Ok(b) => pending = b,
+                        Err(_) => return Ok(0),
+                    }
+                }
+                let n = pending.len().min(buf.len());
+                buf[..n].copy_from_slice(&pending[..n]);
+                pending.drain(..n);
+                Ok(n)
+            }),
+            write: Box::new(move |b| to_phone.send(b.to_vec()).map_err(|_| std::io::Error::other("закрыто"))),
+        });
+        Some((to_pc, from_pc))
     }
 
     fn emit(&self, e: Event) {
@@ -188,6 +218,11 @@ impl Platform for MockPlatform {
                 }
             })
             .ok();
+    }
+
+    fn bluetooth(&self, on: bool, accept: BtAccept) -> anyhow::Result<Option<String>> {
+        *self.bt.lock() = on.then_some(accept);
+        Ok(on.then(|| "00:1A:7D:DA:71:13".to_string()))
     }
 
     fn capture(&self, on: bool) {

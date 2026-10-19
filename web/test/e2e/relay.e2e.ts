@@ -4,6 +4,7 @@
 // Запуск: npm run build && cargo build -p dotlink-server -p dotlink-relay && npm run e2e
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { createServer, type Server } from 'node:http'
 import { createServer as tcp } from 'node:net'
 import { extname, join, normalize, resolve } from 'node:path'
@@ -74,6 +75,18 @@ describe('DotLink e2e: разные сети', () => {
     await phone.getByText('Интернет · напрямую').waitFor({ timeout: 15_000 })
     const saved = await phone.evaluate(() => JSON.parse(localStorage.getItem('dotlink.pcs') || '[]'))
     expect(saved[0].routes.relay.room).toMatch(/^[\w-]{22}$/)
+  })
+
+  it('файл через ретранслятор идёт внутри сессии', async () => {
+    await phone.getByRole('tab', { name: 'Файлы' }).click()
+    const chooser = phone.waitForEvent('filechooser')
+    await phone.getByRole('button', { name: 'Выбрать файлы' }).click()
+    const body = Buffer.alloc(200_000, 7)
+    await (await chooser).setFiles({ name: 'через-интернет.bin', mimeType: 'application/octet-stream', buffer: body })
+    await phone.getByText('Файл на ПК — в «Загрузки/DotLink»').waitFor({ timeout: 15_000 })
+    const got = readFileSync(join(tmpdir(), 'dotlink-mock-downloads', 'через-интернет.bin'))
+    expect(got.equals(body)).toBe(true)
+    await phone.getByRole('tab', { name: 'Система' }).click()
   })
 
   it('ПК снова виден в сети — телефон сам переходит на Wi-Fi', async () => {

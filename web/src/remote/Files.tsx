@@ -4,19 +4,29 @@ import { fileToPayload, formatBytes, pickFiles, timeAgo } from '../lib/format'
 import { cameraAvailable } from '../lib/qrscan'
 import type { Payload } from '../lib/qrstream'
 import { QrReceiveView, QrSendView } from '../features/QrStream'
-import { copyText, readText, saveBytes, saveFromUrl, uploadShared } from './native'
+import { copyText, readShared, readText, saveBytes, saveFromUrl, uploadShared } from './native'
+import { fetchInSession, sendInSession } from '../lib/filexfer'
 import { hostUrl, link, offers, sharedQueue } from './state'
 
 interface Up { name: string; size: number; done: number; state: 'up' | 'ok' | 'err' }
 
-/** Загрузка на ПК: билет по защищённому каналу, сами байты — отдельным HTTP-запросом. */
+/** Загрузка на ПК: билет по защищённому каналу, сами байты — HTTP-запросом по Wi-Fi
+ *  или частями внутри сессии через ретранслятор и Bluetooth. */
 async function ticket(name: string, size: number): Promise<string> {
   const wait = link.once('ticket', (m) => m.name === name)
   link.json({ t: 'upload', name, size: size >= 0 ? size : null })
-  return hostUrl((await wait).url)
+  return (await wait).url
 }
 
-function put(url: string, file: File, onProgress: (n: number) => void): Promise<void> {
+const direct = () => link.via.value === 'lan'
+
+async function sendFile(f: Blob, name: string, onProgress: (n: number) => void) {
+  const url = await ticket(name, f.size)
+  if (direct()) await put(hostUrl(url), f, onProgress)
+  else await sendInSession(link, f, url, onProgress)
+}
+
+function put(url: string, file: Blob, onProgress: (n: number) => void): Promise<void> {
   return new Promise((res, rej) => {
     const x = new XMLHttpRequest()
     x.open('PUT', url)
@@ -40,7 +50,7 @@ export function Files() {
     setUps((u) => [...files.map((f) => ({ name: f.name, size: f.size, done: 0, state: 'up' as const })), ...u].slice(0, 12))
     for (const f of files) {
       try {
-        await put(await ticket(f.name, f.size), f, (n) => upd(f.name, { done: n }))
+        await sendFile(f, f.name, (n) => upd(f.name, { done: n }))
         upd(f.name, { done: f.size, state: 'ok' })
       } catch (e) {
         upd(f.name, { state: 'err' })
@@ -59,7 +69,8 @@ export function Files() {
       for (const f of queue) {
         try {
           setUps((u) => [{ name: f.name, size: f.size, done: 0, state: 'up' as const }, ...u])
-          await uploadShared(f.uri, await ticket(f.name, f.size))
+          if (direct()) await uploadShared(f.uri, hostUrl(await ticket(f.name, f.size)))
+          else await sendFile(await readShared(f.uri, f.type), f.name, (n) => upd(f.name, { done: n }))
           upd(f.name, { done: f.size, state: 'ok' })
           toast(`«${f.name}» отправлен на ПК`)
         } catch (e) { upd(f.name, { state: 'err' }); toast(String((e as Error).message || e), 'err') }
@@ -86,7 +97,10 @@ export function Files() {
             <div key={o.url} class="up-row">
               <span class="grow"><b class="ellipsis">{o.name}</b><span class="muted small">{formatBytes(o.size)} · {timeAgo(o.at)}</span></span>
               <Button size="sm" icon="download" onClick={async () => {
-                try { const where = await saveFromUrl(hostUrl(o.url), o.name); toast(`Сохранено: ${where}`); offers.value = offers.value.filter((x) => x !== o) }
+                try {
+                  const where = direct() ? await saveFromUrl(hostUrl(o.url), o.name) : await saveBytes(await fetchInSession(link, o.url), o.name, 'application/octet-stream')
+                  toast(`Сохранено: ${where}`); offers.value = offers.value.filter((x) => x !== o)
+                }
                 catch (e) { toast('Не удалось скачать: ' + (e as Error).message, 'err') }
               }}>Скачать</Button>
             </div>

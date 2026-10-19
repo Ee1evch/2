@@ -68,6 +68,19 @@ pub enum Event {
     Capture(CaptureEv),
 }
 
+/// Входящее соединение Bluetooth RFCOMM: поток байтов в обе стороны (блокирующие вызовы —
+/// ядро само переводит их в асинхронный канал).
+pub struct BtConn {
+    pub peer: String,
+    pub read: BtRead,
+    pub write: BtWrite,
+}
+
+pub type BtRead = Box<dyn FnMut(&mut [u8]) -> std::io::Result<usize> + Send>;
+pub type BtWrite = Box<dyn FnMut(&[u8]) -> std::io::Result<()> + Send>;
+
+pub type BtAccept = Arc<dyn Fn(BtConn) + Send + Sync>;
+
 pub trait Platform: Send + Sync + 'static {
     fn name(&self) -> &'static str;
 
@@ -107,6 +120,11 @@ pub trait Platform: Send + Sync + 'static {
     fn capture(&self, _on: bool) {}
     /// С какого края экрана курсор уходит на телефон: right | left | top | bottom | off.
     fn set_edge(&self, _edge: &str) {}
+    /// Принимать телефоны по Bluetooth RFCOMM (или перестать). `Ok(Some(адрес адаптера))` — служба
+    /// объявлена; `Ok(None)` — Bluetooth на этом ПК нет. Вызывается из рабочего потока.
+    fn bluetooth(&self, _on: bool, _accept: BtAccept) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
     /// Журнал имитации — для e2e-тестов; у настоящей платформы его нет.
     fn debug_log(&self) -> Option<serde_json::Value> {
         None

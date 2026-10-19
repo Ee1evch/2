@@ -1,6 +1,7 @@
 //! Windows: SendInput, Core Audio, GSMTC, питание, буфер обмена, брандмауэр, хуки для «мыши ПК на телефоне».
 
 mod audio;
+mod bt;
 mod capture;
 mod input;
 mod media;
@@ -119,6 +120,9 @@ impl Platform for WindowsPlatform {
     }
     fn capture(&self, on: bool) {
         capture::set_capture(on);
+    }
+    fn bluetooth(&self, on: bool, accept: BtAccept) -> anyhow::Result<Option<String>> {
+        bt::set(on, accept)
     }
     fn set_edge(&self, edge: &str) {
         capture::set_edge(edge);

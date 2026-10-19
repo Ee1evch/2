@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const TICKET_TTL: Duration = Duration::from_secs(120);
+/// Предел файла, когда размер неизвестен заранее (файл из «Поделиться» Android).
+pub const MAX_UPLOAD: u64 = 64 << 30;
 
 #[derive(Clone, Debug)]
 pub enum Ticket {

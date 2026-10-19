@@ -22,7 +22,6 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
 /// Предел для файлов неизвестного размера.
-const MAX_UPLOAD: u64 = 64 << 30;
 
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../web/dist"]
@@ -93,7 +92,7 @@ async fn upload(State(core): State<Arc<Core>>, Path(ticket): Path<String>, body:
         while let Some(chunk) = s.next().await {
             let chunk = chunk.map_err(std::io::Error::other)?;
             got += chunk.len() as u64;
-            if got > size.unwrap_or(MAX_UPLOAD) {
+            if got > size.unwrap_or(crate::files::MAX_UPLOAD) {
                 return Err(std::io::Error::other("файл больше заявленного"));
             }
             f.write_all(&chunk).await?;
