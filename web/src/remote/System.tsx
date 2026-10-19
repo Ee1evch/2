@@ -22,7 +22,7 @@ function TimerSetup() {
       <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>Другое время…</Button>
       <Sheet open={open} onClose={() => setOpen(false)} title="Через сколько?">
         <div class="stack">
-          <DotDisplay text={`${min} MIN`} pitch={6} />
+          <DotDisplay text={`${min} МИН`} pitch={6} />
           <DotSlider value={(min - 5) / 235} onInput={(v) => setMin(Math.round(5 + v * 235))} label="Минуты" />
           <Button variant="primary" block onClick={() => start(min)}>Запустить</Button>
         </div>
