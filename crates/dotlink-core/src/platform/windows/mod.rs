@@ -1,6 +1,7 @@
-//! Windows: SendInput, Core Audio, GSMTC, питание, буфер обмена, брандмауэр.
+//! Windows: SendInput, Core Audio, GSMTC, питание, буфер обмена, брандмауэр, хуки для «мыши ПК на телефоне».
 
 mod audio;
+mod capture;
 mod input;
 mod media;
 mod system;
@@ -100,6 +101,7 @@ impl Platform for WindowsPlatform {
                 input.key(*vk, KeyAction::Press);
             }
         });
+        capture::start(tx.clone());
         system::spawn_watchers(tx, self.net.clone());
     }
     fn downloads_dir(&self) -> PathBuf {
@@ -114,6 +116,12 @@ impl Platform for WindowsPlatform {
     }
     fn allow_firewall(&self) -> anyhow::Result<()> {
         system::allow_firewall()
+    }
+    fn capture(&self, on: bool) {
+        capture::set_capture(on);
+    }
+    fn set_edge(&self, edge: &str) {
+        capture::set_edge(edge);
     }
     fn fine_timer(&self, on: bool) {
         use ::windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};

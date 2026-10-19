@@ -4,4 +4,7 @@
     <string name="title_activity_main">DotLink</string>
     <string name="package_name">app.dotlink.remote</string>
     <string name="custom_url_scheme">app.dotlink.remote</string>
+    <string name="control_service_label">DotLink: управление с ПК</string>
+    <string name="control_service_description">Позволяет ПК, сопряжённому с DotLink, нажимать на экран, листать, вводить текст и показывать курсор мыши ПК. Работает только во время подключения к вашему ПК; ничего не читает и не отправляет само.</string>
+    <string name="notify_service_label">DotLink: уведомления на ПК</string>
 </resources>

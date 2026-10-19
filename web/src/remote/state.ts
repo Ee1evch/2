@@ -2,6 +2,7 @@ import { effect, signal } from '@preact/signals'
 import { Link } from '../lib/link'
 import { DEFAULT_PREFS, type PadPrefs } from './trackpad'
 import { setHaptics, toast } from '../ui'
+import type { SharedFile } from './native'
 
 export const link = new Link()
 
@@ -26,6 +27,9 @@ effect(() => {
   try { localStorage.setItem(KEY, JSON.stringify(prefs.value)) } catch { /* приватный режим */ }
 })
 export const setPref = <K extends keyof Prefs>(k: K, v: Prefs[K]) => { prefs.value = { ...prefs.value, [k]: v } }
+
+/** Файлы из «Поделиться» Android, ждущие отправки на ПК (их забирает экран «Файлы»). */
+export const sharedQueue = signal<SharedFile[]>([])
 
 /** Входящие предложения файлов от ПК. */
 export const offers = signal<{ name: string; size: number; url: string; at: number }[]>([])

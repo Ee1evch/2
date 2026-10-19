@@ -7,6 +7,7 @@ import { fileToPayload, formatBytes, pickFiles, timeAgo } from '../lib/format'
 import type { Payload } from '../lib/qrstream'
 import { MediaCard, SysCards, VolumeCard, WindowCard, useTicker, TimerCard } from '../remote/Home'
 import { QrReceiveView, QrSendView } from '../features/QrStream'
+import { Notifications, PhoneTab } from './Phone'
 import './dashboard.css'
 
 const link = new Link()
@@ -229,6 +230,10 @@ function Settings() {
       <Toggle checked={s.autostart} onChange={(v) => set('autostart', v)} label="Запускать вместе с Windows" hint="DotLink стартует свёрнутым в трей" />
       <Toggle checked={s.clip_sync} onChange={(v) => set('clip_sync', v)} label="Буфер обмена → телефон" hint="Скопированный на ПК текст сразу виден на телефоне" />
       <Toggle checked={s.notify} onChange={(v) => set('notify', v)} label="Уведомления" hint="О новых устройствах и принятых файлах" />
+      <Toggle checked={s.phone_notifications} onChange={(v) => set('phone_notifications', v)} label="Уведомления телефона в Windows" hint="Сообщения и звонки с телефона — всплывающими уведомлениями" />
+      <div class="field"><span class="label">Мышь уходит на телефон через край экрана</span>
+        <Segmented value={s.uc_edge} onChange={(v) => set('uc_edge', v)} options={[{ value: 'left', label: 'Слева' }, { value: 'right', label: 'Справа' }, { value: 'top', label: 'Сверху' }, { value: 'bottom', label: 'Снизу' }, { value: 'off', label: 'Нет' }]} />
+      </div>
     </Card>
     <Connectivity s={s} set={set} />
     <Card label="Компьютер" icon="desktop" span={2}>
@@ -281,9 +286,9 @@ function Connectivity({ s, set }: { s: any; set: (k: string, v: unknown) => void
 
 // ───────── каркас ─────────
 
-type Tab = 'overview' | 'devices' | 'macros' | 'files' | 'settings'
+type Tab = 'overview' | 'phone' | 'devices' | 'macros' | 'files' | 'settings'
 const TABS: { id: Tab; icon: IconName; label: string }[] = [
-  { id: 'overview', icon: 'home', label: 'Обзор' }, { id: 'devices', icon: 'phone', label: 'Устройства' },
+  { id: 'overview', icon: 'home', label: 'Обзор' }, { id: 'phone', icon: 'phone', label: 'Телефон' }, { id: 'devices', icon: 'link', label: 'Устройства' },
   { id: 'macros', icon: 'bolt', label: 'Макросы' }, { id: 'files', icon: 'files', label: 'Файлы' }, { id: 'settings', icon: 'settings', label: 'Настройки' },
 ]
 
@@ -330,7 +335,9 @@ function App() {
               <MediaCard i={3} />
               <VolumeCard i={4} />
               <WindowCard i={5} />
+              <Notifications link={link} cmd={cmd} />
             </>}
+            {tab === 'phone' && <PhoneTab link={link} cmd={cmd} />}
             {tab === 'devices' && <Devices />}
             {tab === 'macros' && <Macros />}
             {tab === 'files' && <Files />}

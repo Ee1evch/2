@@ -46,6 +46,15 @@ export async function pushClipboard(force = false): Promise<boolean> {
   return link.json({ t: 'clip-set', text: t })
 }
 
+/** «Поделиться → DotLink»: ссылка открывается на ПК, текст — в буфер ПК. */
+export function handoffText(t: string) {
+  const s = t.trim()
+  if (!s) return
+  const url = s.match(/https?:\/\/\S+/)?.[0]
+  if (url) link.json({ t: 'open-url', url })
+  else { lastSeen = s; link.json({ t: 'clip-set', text: s }) }
+}
+
 /** «Открыть на ПК»: ссылка из буфера телефона открывается в браузере ПК. */
 export async function handoffToPc(): Promise<void> {
   const t = (await readClip())?.trim() || ''

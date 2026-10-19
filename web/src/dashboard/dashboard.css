@@ -55,3 +55,17 @@ html, body { height:100%; }
 .media-ctl { display:flex; align-items:center; justify-content:center; gap:18px; }
 .win-row { display:flex; flex-direction:column; gap:2px; min-width:0; }
 .no-token { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; min-height:100vh; text-align:center; padding:24px; }
+
+/* ───────── экран телефона ───────── */
+.mirror-card { align-content:start; }
+.mirror-wrap { position:relative; display:grid; place-items:center; background:var(--bg); border-radius:var(--r-m); padding:10px; min-height:320px; }
+.mirror-cv { display:block; max-width:100%; max-height:min(70vh, 720px); border-radius:18px; background:#000; outline:none; cursor:pointer; box-shadow:0 0 0 1px var(--border-2); }
+.mirror-cv:focus-visible { box-shadow:0 0 0 2px var(--accent); }
+.mirror-fps { position:absolute; right:14px; bottom:12px; }
+.mirror-empty { display:grid; justify-items:center; gap:12px; text-align:center; padding:28px 12px; background:var(--bg); border-radius:var(--r-m); color:var(--muted); }
+.mirror-empty p { max-width:36ch; margin:0; }
+.mirror-nav { gap:6px; }
+.notif-list { display:grid; gap:8px; max-height:420px; overflow:auto; }
+.notif { display:grid; gap:2px; padding:10px 12px; border-radius:var(--r-s); background:var(--bg); }
+.notif p { margin:4px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.input.sm { padding:6px 10px; min-height:0; font-size:13px; width:auto; max-width:180px; }

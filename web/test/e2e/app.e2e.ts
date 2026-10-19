@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader'
 import { QrReceiver } from '../../src/lib/qrstream'
+import { mirrorFrame, NodePhone } from './nodephone'
 
 const ROOT = resolve(__dirname, '../../..')
 const BIN = process.env.DOTLINK_SERVER || join(ROOT, 'target/debug/dotlink-server' + (process.platform === 'win32' ? '.exe' : ''))
@@ -217,6 +218,78 @@ describe('DotLink e2e', () => {
     expect(codes / frames).toBeGreaterThanOrEqual(4) // в кадре сразу несколько QR
     await dash.getByRole('button', { name: 'Остановить' }).click()
   }, 60_000)
+
+  it('экран телефона на ПК: видео, касания и кнопки, уведомления, мышь ПК на телефоне', async () => {
+    // второй телефон — без браузера: шлёт видео экрана, как приложение для Android
+    const admin = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    const snap: any = await new Promise((res) => {
+      admin.onopen = () => admin.send(JSON.stringify({ t: 'hello', v: 1, role: 'admin', token: adminToken }))
+      admin.onmessage = (e) => { const m = JSON.parse(String(e.data)); if (m.t === 'snapshot') res(m.v) }
+    })
+    admin.close()
+    const secret = new URLSearchParams(new URL(snap.pairing.url).hash.slice(1)).get('pair')!
+    const np = await NodePhone.pair(`ws://127.0.0.1:${port}/ws`, secret, 'Galaxy S25')
+    await np.waitFor((m) => m.t === 'snapshot')
+    np.json({ t: 'mirror', on: true, w: 320, h: 240, codec: 'vp8' })
+
+    await dash.getByRole('tab', { name: 'Телефон' }).click()
+    await dash.locator('.mirror-cv').waitFor()
+    // видео кодирует настоящий VideoEncoder: красный экран 320×240
+    const chunks: { key: boolean; d: number[]; t: number }[] = await dash.evaluate(async () => {
+      const out: { key: boolean; d: number[]; t: number }[] = []
+      const enc = new VideoEncoder({ output: (c) => { const b = new Uint8Array(c.byteLength); c.copyTo(b); out.push({ key: c.type === 'key', d: Array.from(b), t: c.timestamp }) }, error: () => {} })
+      enc.configure({ codec: 'vp8', width: 320, height: 240, bitrate: 400_000, framerate: 30 })
+      const cv = new OffscreenCanvas(320, 240), g = cv.getContext('2d')!
+      for (let i = 0; i < 8; i++) {
+        g.fillStyle = 'rgb(255,40,30)'; g.fillRect(0, 0, 320, 240)
+        const f = new VideoFrame(cv, { timestamp: i * 33_333 })
+        enc.encode(f, { keyFrame: i === 0 }); f.close()
+      }
+      await enc.flush()
+      return out
+    })
+    expect(chunks[0].key).toBe(true)
+    for (const c of chunks) np.bin(mirrorFrame(Uint8Array.from(c.d), c.key, c.t / 1000, 320, 240))
+    await waitFor(() => dash.evaluate(() => {
+      const c = document.querySelector('.mirror-cv') as HTMLCanvasElement
+      if (c.width !== 320) return false
+      const p = c.getContext('2d')!.getImageData(160, 120, 1, 1).data
+      return p[0] > 200 && p[1] < 100
+    }), 8000)
+    await shot(dash, 'dashboard-phone')
+
+    // клик по картинке — касание в той же точке экрана телефона
+    const box = (await dash.locator('.mirror-cv').boundingBox())!
+    await dash.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.75)
+    const tap = await np.waitFor((m) => m.t === 'ctl' && m.a === 'tap')
+    expect(tap.x).toBeCloseTo(0.25, 1)
+    expect(tap.y).toBeCloseTo(0.75, 1)
+    // перетаскивание — свайп по пути
+    await dash.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.8)
+    await dash.mouse.down()
+    await dash.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.2, { steps: 8 })
+    await dash.mouse.up()
+    const swipe = await np.waitFor((m) => m.t === 'ctl' && m.a === 'path')
+    expect(swipe.path.at(-1)).toBeLessThan(0.3)
+    await dash.getByRole('button', { name: 'Домой' }).click()
+    await np.waitFor((m) => m.t === 'ctl' && m.a === 'home')
+    // печать на клавиатуре ПК — текст в поле на телефоне
+    await dash.locator('.mirror-cv').focus()
+    await dash.keyboard.type('Hi')
+    expect((await np.waitFor((m) => m.t === 'ctl' && m.a === 'text')).text).toBe('Hi')
+
+    // уведомление телефона — на ПК
+    np.json({ t: 'notify', app: 'Telegram', title: 'Анна', text: 'Буду через 5 минут' })
+    await dash.getByText('Буду через 5 минут').waitFor()
+
+    // мышь и клавиатура ПК — на телефон и обратно
+    await dash.getByRole('button', { name: 'Перевести на телефон' }).click()
+    await np.waitFor((m) => m.t === 'uc' && m.on === true)
+    expect((await events()).some((e) => e.capture === true)).toBe(true)
+    await dash.getByRole('button', { name: 'Вернуть на ПК' }).click()
+    await np.waitFor((m) => m.t === 'uc' && m.on === false)
+    np.close()
+  })
 
   it('отзыв устройства на ПК выкидывает телефон на экран подключения', async () => {
     await dash.getByRole('tab', { name: 'Устройства' }).click()

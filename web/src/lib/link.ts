@@ -461,6 +461,9 @@ export class Link {
 
   get online() { return this.status.value === 'online' && !!this.pipe }
 
+  /** Сколько байт ждёт отправки основным путём — по нему видео решает, пропускать ли кадры. */
+  get backlog(): number { return this.pipe?.buffered() ?? 0 }
+
   private sealPipe(b: Uint8Array): boolean {
     const p = this.pipe
     if (!p) return false

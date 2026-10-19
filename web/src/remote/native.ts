@@ -4,6 +4,8 @@ export interface FoundPc { id: string; name: string; host: string; port: number;
 export interface SharedFile { uri: string; name: string; size: number; type: string }
 
 import { Capacitor, registerPlugin } from '@capacitor/core'
+import { unb64, b64 } from '../lib/b64'
+import type { Pipe } from '../lib/pipe'
 
 // плагины регистрируются один раз; в браузере их вызовы недоступны — проверяем isNative()
 const PLUGINS = { DotLink: registerPlugin<any>('DotLink'), Filesystem: registerPlugin<any>('Filesystem'), Haptics: registerPlugin<any>('Haptics') }
@@ -18,11 +20,11 @@ export async function discover(timeout = 2500): Promise<FoundPc[]> {
   try { return (await p.discover({ timeout })).pcs || [] } catch { return [] }
 }
 
-/** Файлы, присланные в DotLink через «Поделиться» Android. */
-export async function sharedFiles(): Promise<SharedFile[]> {
+/** Файлы и ссылки/текст, присланные в DotLink через «Поделиться» Android. */
+export async function sharedItems(): Promise<{ files: SharedFile[]; texts: string[] }> {
   const p = plugin('DotLink')
-  if (!p) return []
-  try { return (await p.getShared()).files || [] } catch { return [] }
+  if (!p) return { files: [], texts: [] }
+  try { const r = await p.getShared(); return { files: r.files || [], texts: r.texts || [] } } catch { return { files: [], texts: [] } }
 }
 
 export function onShared(fn: () => void): () => void {
@@ -96,4 +98,75 @@ export async function readClip(): Promise<string | null> {
   const p = plugin('DotLink')
   if (p) { try { return (await p.readClipboard()).text ?? null } catch { return null } }
   return readText()
+}
+
+// ───────── трансляция экрана, управление, уведомления, Bluetooth ─────────
+
+export interface NativeStatus { control: boolean; controlEnabled: boolean; notifications: boolean; mirror: boolean; bluetooth: boolean }
+
+export async function nativeStatus(): Promise<NativeStatus | null> {
+  const p = plugin('DotLink')
+  if (!p) return null
+  try { return await p.status() } catch { return null }
+}
+
+export async function openSettings(what: 'accessibility' | 'notifications' | 'bluetooth'): Promise<void> {
+  await plugin('DotLink')?.openSettings({ what })
+}
+
+export interface MirrorFrame { d: string; f: number; t: number; w: number; h: number }
+export interface MirrorState { on: boolean; w: number; h: number; codec: string; error?: string }
+
+export const mirror = {
+  start: (o: { max?: number; bitrate?: number; fps?: number }) => plugin('DotLink').mirrorStart(o) as Promise<void>,
+  stop: () => plugin('DotLink').mirrorStop() as Promise<void>,
+  key: (bitrate?: number) => plugin('DotLink').mirrorKey({ bitrate }) as Promise<void>,
+}
+
+/** Подписка на события нативной части; в браузере — ничего. */
+export function onNative(event: 'mirrorFrame' | 'mirrorState' | 'notification' | 'shared', fn: (e: any) => void): () => void {
+  const p = plugin('DotLink')
+  if (!p?.addListener) return () => {}
+  const h = p.addListener(event, fn)
+  return () => { void Promise.resolve(h).then((x: any) => x?.remove?.()) }
+}
+
+/** Жест или кнопка на телефоне по команде с ПК. */
+export async function control(cmd: Record<string, unknown>): Promise<void> {
+  await plugin('DotLink').control(cmd)
+}
+
+export function cursor(a: 'show' | 'hide' | 'move' | 'button' | 'scroll', args: Record<string, number | boolean> = {}): Promise<void> {
+  return plugin('DotLink').cursor({ a, ...args })
+}
+
+/** Канал Bluetooth RFCOMM до ПК как обычная труба сессии. */
+export async function btPipe(addr: string): Promise<Pipe> {
+  const p = plugin('DotLink')
+  if (!p) throw new Error('bluetooth')
+  const { id } = await p.btConnect({ addr })
+  let queued = 0
+  const pipe: Pipe = {
+    via: 'bt',
+    where: `Bluetooth · ${addr}`,
+    send: (d) => {
+      const k = typeof d === 'string' ? 0 : 1
+      const body = typeof d === 'string' ? new TextEncoder().encode(d) : d
+      queued += body.length
+      p.btSend({ id, k, d: b64(body) }).then(() => { queued -= body.length }, () => pipe.close())
+      return true
+    },
+    buffered: () => queued,
+    onmessage: null,
+    onclose: null,
+    close: () => { void p.btClose({ id }); off() },
+  }
+  const msg = p.addListener('bt', (e: any) => {
+    if (e.id !== id) return
+    const body = unb64(e.d)
+    pipe.onmessage?.(e.k === 0 ? new TextDecoder().decode(body) : body)
+  })
+  const closed = p.addListener('btClose', (e: any) => { if (e.id === id) { off(); pipe.onclose?.() } })
+  const off = () => { for (const h of [msg, closed]) void Promise.resolve(h).then((x: any) => x?.remove?.()) }
+  return pipe
 }

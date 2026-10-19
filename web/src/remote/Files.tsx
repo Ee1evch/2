@@ -4,8 +4,8 @@ import { fileToPayload, formatBytes, pickFiles, timeAgo } from '../lib/format'
 import { cameraAvailable } from '../lib/qrscan'
 import type { Payload } from '../lib/qrstream'
 import { QrReceiveView, QrSendView } from '../features/QrStream'
-import { copyText, isNative, onShared, readText, saveBytes, saveFromUrl, sharedFiles, uploadShared } from './native'
-import { hostUrl, link, offers } from './state'
+import { copyText, readText, saveBytes, saveFromUrl, uploadShared } from './native'
+import { hostUrl, link, offers, sharedQueue } from './state'
 
 interface Up { name: string; size: number; done: number; state: 'up' | 'ok' | 'err' }
 
@@ -50,11 +50,13 @@ export function Files() {
     toast(files.length > 1 ? `Отправлено файлов: ${files.length}` : 'Файл на ПК — в «Загрузки/DotLink»')
   }
 
-  // «Поделиться → DotLink» из других приложений Android
+  // «Поделиться → DotLink» из других приложений Android: файлы уходят на ПК
+  const queue = sharedQueue.value
   useEffect(() => {
-    if (!isNative()) return
-    const take = async () => {
-      for (const f of await sharedFiles()) {
+    if (!queue.length || !link.online) return
+    sharedQueue.value = []
+    void (async () => {
+      for (const f of queue) {
         try {
           setUps((u) => [{ name: f.name, size: f.size, done: 0, state: 'up' as const }, ...u])
           await uploadShared(f.uri, await ticket(f.name, f.size))
@@ -62,10 +64,8 @@ export function Files() {
           toast(`«${f.name}» отправлен на ПК`)
         } catch (e) { upd(f.name, { state: 'err' }); toast(String((e as Error).message || e), 'err') }
       }
-    }
-    void take()
-    return onShared(() => void take())
-  }, [link.status.value])
+    })()
+  }, [queue, link.status.value])
 
   return (
     <div class="grid home-grid">
