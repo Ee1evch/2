@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { createPortal } from 'preact/compat'
 import { Button, DotDisplay, DotGrid, IconButton, Segmented, haptic } from '../ui'
 import { DENSITY, drawGrid, layout, pack, QrReceiver, QrSender, type Density, type Payload } from '../lib/qrstream'
 import { cameraAvailable, QrScanner, type ScanStats } from '../lib/qrscan'
@@ -67,7 +68,7 @@ export function QrSendView({ payload, onClose, compact }: { payload: Payload; on
   const k = sender?.k ?? 0
   const eta = k && per ? Math.ceil((k * 1.25) / (per * fps)) : 0
 
-  return (
+  return createPortal(
     <div class="qr-full">
       <canvas ref={canvas} class="qr-canvas" aria-label="Поток QR-кодов" />
       <div class="qr-bar">
@@ -86,7 +87,8 @@ export function QrSendView({ payload, onClose, compact }: { payload: Payload; on
           <Segmented value={fps} onChange={setFps} options={[8, 12, 15, 20].map((f) => ({ value: f, label: f + ' к/с' }))} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -122,7 +124,7 @@ export function QrReceiveView({ onFile, onClose, facing = 'environment' }: { onF
   }, [])
 
   const pct = prog.k ? Math.min(99, Math.floor((prog.have / prog.k) * 100)) : 0
-  return (
+  return createPortal(
     <div class="qr-full dark">
       <video ref={video} class="qr-video" playsInline muted />
       <div class="qr-aim" aria-hidden="true"><i /><i /><i /><i /></div>
@@ -145,6 +147,7 @@ export function QrReceiveView({ onFile, onClose, facing = 'environment' }: { onF
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

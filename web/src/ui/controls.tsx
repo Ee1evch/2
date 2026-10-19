@@ -1,6 +1,7 @@
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
+import { createPortal } from 'preact/compat'
 import { DotIcon } from './dots'
 import type { IconName } from './doticons'
 import { haptic } from './haptics'
@@ -210,14 +211,15 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
     return () => removeEventListener('keydown', k)
   }, [open])
   if (!open) return null
-  return <>
+  // в портал: карточки с анимацией и overflow:hidden иначе обрезали бы шторку
+  return createPortal(<>
     <div class="scrim" onClick={onClose} />
     <div class="sheet" role="dialog" aria-modal="true">
       <div class="grab" />
       {title && <h3>{title}</h3>}
       {children}
     </div>
-  </>
+  </>, document.body)
 }
 
 const toasts = signal<{ id: number; msg: string; kind?: 'err' }[]>([])
