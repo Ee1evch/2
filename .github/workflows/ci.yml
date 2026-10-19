@@ -43,7 +43,10 @@ jobs:
       - name: Rust — clippy (Linux)
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Rust — clippy Windows-слоя (кросс-проверка)
-        run: cargo clippy -p dotlink-core --target x86_64-pc-windows-gnu --all-targets -- -D warnings
+        run: |
+          # ring (TLS ретранслятора, DTLS WebRTC) собирает C-код — нужен кросс-компилятор
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+          cargo clippy -p dotlink-core --target x86_64-pc-windows-gnu --all-targets -- -D warnings
       - name: Rust — тесты
         run: cargo test --workspace
       - name: e2e — ядро без окна и ретранслятор
