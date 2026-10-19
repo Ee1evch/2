@@ -32,7 +32,7 @@ input, textarea, .clip-text { -webkit-user-select:text; user-select:text; }
 
 /* ───────── тачпад ───────── */
 .tab-pad .r-main { display:flex; padding-bottom:calc(92px + var(--safe-b)); }
-.pad-view { flex:1; display:flex; flex-direction:column; gap:10px; min-height:calc(100dvh - 170px - var(--safe-t) - var(--safe-b)); }
+.pad-view { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px; min-height:calc(100dvh - 170px - var(--safe-t) - var(--safe-b)); }
 .pad { position:relative; flex:1; min-height:220px; border-radius:var(--r-xl); background:var(--bg-2); box-shadow:inset 0 0 0 1px var(--border); overflow:hidden; touch-action:none; -webkit-touch-callout:none; }
 .pad-hint { position:absolute; left:0; right:0; bottom:16px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11.5px; color:var(--muted); pointer-events:none; animation:hint-in .6s var(--ease) both; }
 @keyframes hint-in { from { opacity:0; transform:translateY(6px); } }
@@ -42,7 +42,7 @@ input, textarea, .clip-text { -webkit-user-select:text; user-select:text; }
 .pad-btn.kb.on { background:var(--accent); color:var(--on-accent); box-shadow:none; }
 
 /* ───────── клавиатура ───────── */
-.kbd { display:flex; flex-direction:column; gap:7px; padding:10px; border-radius:var(--r-l); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); animation:rise .3s var(--ease); }
+.kbd { display:flex; flex-direction:column; gap:7px; min-width:0; padding:10px; border-radius:var(--r-l); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); animation:rise .3s var(--ease); }
 .kbd-input { height:48px; font-size:16px; }
 .kbd-row { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; padding-bottom:2px; }
 .kbd-row::-webkit-scrollbar { display:none; }
