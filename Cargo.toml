@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/dotlink-core", "crates/dotlink-server", "crates/dotlink-fountain"]
+# Tauri-приложение собирается отдельно: ему нужны WebView2/WebKitGTK, а ядру и тестам — нет.
+exclude = ["apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.80"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.release.package.dotlink-fountain]
+opt-level = 3

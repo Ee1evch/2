@@ -1,0 +1,65 @@
+[package]
+name = "dotlink-core"
+description = "Ядро DotLink: сервер, протокол, сопряжение, обнаружение и управление ПК"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "fs", "io-util"] }
+axum = { version = "0.8", features = ["ws"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+mime_guess = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mdns-sd = "0.13"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hmac = "0.12"
+sha2 = "0.10"
+hkdf = "0.12"
+chacha20poly1305 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+if-addrs = "0.13"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+tracing = "0.1"
+anyhow = "1"
+dirs = "6"
+parking_lot = "0.12"
+percent-encoding = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Media_Control",
+  "Storage_Streams",
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_Networking_NetworkListManager",
+  "Win32_Security",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_Power",
+  "Win32_System_Shutdown",
+  "Win32_System_SystemServices",
+  "Win32_System_Threading",
+  "Win32_System_WinRT",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.61"
+windows-future = "0.2"
+
+[dev-dependencies]
+tokio-tungstenite = "0.26"

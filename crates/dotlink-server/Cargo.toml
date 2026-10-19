@@ -1,0 +1,16 @@
+[package]
+name = "dotlink-server"
+description = "DotLink без окна: ядро для разработки, тестов и запуска на ПК без Tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dotlink-server"
+path = "src/main.rs"
+
+[dependencies]
+dotlink-core = { path = "../dotlink-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"

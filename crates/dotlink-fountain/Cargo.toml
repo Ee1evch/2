@@ -1,0 +1,12 @@
+[package]
+name = "dotlink-fountain"
+description = "Фонтанный код RaptorQ (RFC 6330) для QR-потока, собирается в WebAssembly без wasm-bindgen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+raptorq = "2"

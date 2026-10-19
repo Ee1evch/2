@@ -1,0 +1,32 @@
+{
+  "name": "dotlink-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DotLink UI: UI kit, пульт телефона (PWA) и дашборд ПК.",
+  "scripts": {
+    "font": "node tools/gen-dotfont.mjs",
+    "wasm": "node tools/build-wasm.mjs",
+    "prepare-assets": "npm run font && npm run wasm",
+    "dev": "npm run prepare-assets && vite",
+    "build": "npm run prepare-assets && tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/ciphers": "2.0.0",
+    "@noble/curves": "2.0.0",
+    "@noble/hashes": "2.0.0",
+    "@preact/signals": "2.3.1",
+    "preact": "10.27.2",
+    "qrcode-generator": "2.0.4",
+    "zxing-wasm": "2.2.4"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "2.10.2",
+    "opentype.js": "1.3.4",
+    "typescript": "5.9.3",
+    "vite": "7.1.12",
+    "vitest": "3.2.4"
+  }
+}

@@ -1,0 +1,16 @@
+node_modules/
+target/
+dist/
+web/src/ui/fonts/DotLinkDot.woff
+web/src/lib/wasm/*.wasm
+*.log
+.DS_Store
+/data/
+apps/android/android/app/build/
+apps/android/android/.gradle/
+apps/android/android/build/
+apps/android/android/local.properties
+apps/android/android/app/src/main/assets/public/
+apps/android/android/capacitor-cordova-android-plugins/
+test-results/
+playwright-report/
