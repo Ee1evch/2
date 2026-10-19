@@ -166,6 +166,13 @@ impl Channel {
     }
 }
 
+/// Комната на ретрансляторе выводится из секрета ПК: ретранслятор проверяет, что ПК знает секрет,
+/// ничего не храня. Та же функция — в `dotlink_relay::room_id`.
+pub fn room_id(secret: &str) -> String {
+    let h = Sha256::new().chain_update(b"dotlink/relay-room/v1").chain_update(secret.as_bytes()).finalize();
+    crate::util::b64url(&h[..16])
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -247,6 +254,11 @@ pub(crate) mod tests {
         // ключи разных каналов не подходят друг к другу
         let mut main = Channel::new(&dk, &nc, &ns, true);
         assert!(main.open(&c.seal(&[9])).is_none());
+    }
+
+    #[test]
+    fn room_matches_relay() {
+        assert_eq!(room_id("секрет-комнаты"), "HS9MAAq_dZ-4U56mlDIxtA");
     }
 
     #[test]

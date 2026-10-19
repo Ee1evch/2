@@ -168,7 +168,7 @@ impl Core {
         let addrs = crate::net::addrs();
         let (id, name, relay, room, bt) = {
             let c = self.store.read();
-            (c.pc_id.clone(), c.pc_name.clone(), c.settings.relay_url.clone(), c.room.clone(), c.settings.bluetooth)
+            (c.pc_id.clone(), c.pc_name.clone(), c.settings.relay_url.clone(), c.room(), c.settings.bluetooth)
         };
         let hosts: Vec<&str> = addrs.iter().take(4).map(|a| a.ip.as_str()).collect();
         let first = hosts.first().copied().unwrap_or("127.0.0.1");
@@ -188,7 +188,7 @@ impl Core {
     /// Маршруты до ПК для сопряжённых телефонов: если сеть сменится, телефон найдёт ПК другим путём.
     pub fn publish_routes(&self) {
         let c = self.store.read();
-        let relay = (!c.settings.relay_url.is_empty()).then(|| json!({ "url": c.settings.relay_url, "room": c.room }));
+        let relay = (!c.settings.relay_url.is_empty()).then(|| json!({ "url": c.settings.relay_url, "room": c.room() }));
         let lan: Vec<String> = crate::net::addrs().into_iter().map(|a| a.ip).collect();
         self.hub.set("routes", json!({ "lan": lan, "port": self.port(), "relay": relay, "ice": c.settings.ice_servers, "bt": c.settings.bluetooth }));
     }
@@ -630,7 +630,7 @@ impl Core {
                 Ok(s) => {
                     let auto = s.autostart;
                     self.platform.set_edge(&s.uc_edge);
-                    let _ = self.settings_tx.send(s.clone());
+                    self.settings_tx.send_replace(s.clone());
                     self.store.update(|c| c.settings = s);
                     let r = self.host.set_autostart(auto);
                     self.publish_config();

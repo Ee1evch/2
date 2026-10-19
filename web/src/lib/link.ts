@@ -538,7 +538,7 @@ function mergeHosts(first: string, rest: string[]): string[] {
   return [first, ...rest.filter((h) => h !== first)].slice(0, 8)
 }
 
-export interface PairLink { secret: string; pc: string; hosts: string[]; port: number; name: string; routes: Routes }
+export interface PairLink { secret: string; pc: string; hosts: string[]; port: number; name: string; routes: Routes; go: string }
 
 /** Разбор ссылки из QR (v2): http://ip:port/#v=2&pair=…&pc=…&h=ip1,ip2&p=порт&n=имя&r=ретранслятор&rm=комната&bt=адрес */
 export function parsePairUrl(url: string): PairLink | null {
@@ -552,6 +552,18 @@ export function parsePairUrl(url: string): PairLink | null {
     const hosts = [...own, ...(q.get('h') || '').split(',').filter(Boolean).map((h) => `${h}:${port}`)]
     const relay = q.get('r') && q.get('rm') ? { url: q.get('r')!, room: q.get('rm')! } : null
     const bt = q.get('bt')
-    return { secret, pc: q.get('pc') || '', hosts: [...new Set(hosts)], port, name: q.get('n') || '', routes: { relay, bt: bt && bt !== '1' ? bt : null } }
+    return { secret, pc: q.get('pc') || '', hosts: [...new Set(hosts)], port, name: q.get('n') || '', routes: { relay, bt: bt && bt !== '1' ? bt : null }, go: q.get('go') || '' }
   } catch { return null }
+}
+
+/** Вход по отсканированному QR: знакомый ПК — сразу по ключу устройства (без нового сопряжения),
+ *  новый — сопряжение по секрету из QR. Маршруты из QR дополняют сохранённые. */
+export function pairAuth(p: PairLink, extraHosts: string[] = []): { auth: Auth; hosts: string[] } {
+  const known = p.pc ? loadSaved().find((s) => s.pc === p.pc) : undefined
+  const hosts = [...new Set([...extraHosts, ...p.hosts, ...(known?.hosts || [])])]
+  if (known) {
+    const routes: Routes = { ...known.routes, relay: p.routes.relay || known.routes?.relay, bt: p.routes.bt || known.routes?.bt }
+    return { auth: { kind: 'device', saved: { ...known, routes } }, hosts }
+  }
+  return { auth: { kind: 'qr', secret: p.secret, routes: p.routes }, hosts }
 }

@@ -10,6 +10,7 @@ pub mod net;
 pub mod pairing;
 pub mod platform;
 pub mod proto;
+pub mod relay;
 pub mod rtc;
 pub mod server;
 pub mod session;
@@ -127,6 +128,8 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
             }
         });
     }
+
+    relay::start(core.clone());
 
     let disc = if opts.discovery {
         let c = core.clone();

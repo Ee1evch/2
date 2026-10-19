@@ -46,8 +46,8 @@ jobs:
         run: cargo clippy -p dotlink-core --target x86_64-pc-windows-gnu --all-targets -- -D warnings
       - name: Rust — тесты
         run: cargo test --workspace
-      - name: e2e — ядро без окна
-        run: cargo build -p dotlink-server
+      - name: e2e — ядро без окна и ретранслятор
+        run: cargo build -p dotlink-server -p dotlink-relay
       - name: e2e — браузер
         working-directory: web
         run: npx playwright install --with-deps chromium

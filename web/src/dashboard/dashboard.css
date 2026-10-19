@@ -14,6 +14,7 @@ html, body { height:100%; }
 .pair-meta { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; }
 .pair-meta .label { width:100%; }
 .pair-how { grid-column:1 / -1; margin:0; }
+.pair-go { grid-column:1 / -1; display:grid; gap:6px; }
 .addrs { display:flex; flex-direction:column; gap:8px; }
 .addr { display:grid; grid-template-columns:16px auto 1fr; align-items:center; gap:10px; min-width:0; }
 .addr .dl-icon { color:var(--accent); }

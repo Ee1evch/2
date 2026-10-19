@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/dotlink-core", "crates/dotlink-server", "crates/dotlink-fountain"]
+members = ["crates/dotlink-core", "crates/dotlink-server", "crates/dotlink-fountain", "crates/dotlink-relay"]
 # Tauri-приложение собирается отдельно: ему нужны WebView2/WebKitGTK, а ядру и тестам — нет.
 exclude = ["apps/desktop/src-tauri"]
 

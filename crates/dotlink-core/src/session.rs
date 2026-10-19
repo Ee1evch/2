@@ -11,7 +11,7 @@ use crate::pairing::Kind;
 use crate::proto::{self, Frame, RemoteCmd};
 use crate::rtc::{self, Rtc, RtcEvent};
 use crate::store::Perms;
-use crate::transport::{Msg, Wire};
+use crate::transport::{Msg, Via, Wire};
 use crate::util::{b64, unb64, unb64_arr};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -125,7 +125,7 @@ async fn fail(tx: &mut Tx, code: &str) -> Option<Role> {
     None
 }
 
-async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut mpsc::Receiver<Msg>, loopback: bool) -> Option<Role> {
+async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut mpsc::Receiver<Msg>, loopback: bool, via: Via) -> Option<Role> {
     let hello = recv_json(rx).await?;
     if hello["t"] != "hello" {
         return fail(tx, "protocol").await;
@@ -147,6 +147,10 @@ async fn handshake(core: &Arc<Core>, tx: &mut Tx, rx: &mut mpsc::Receiver<Msg>, 
     if let Some(mode) = hello["pair"].as_str() {
         // ───── сопряжение ─────
         let kind = if mode == "pin" { Kind::Pin } else { Kind::Qr };
+        // короткий PIN через чужой сервер можно перебрать оффлайн — только вблизи (сеть, Bluetooth)
+        if kind == Kind::Pin && via == Via::Relay {
+            return fail(tx, "pin-local-only").await;
+        }
         let Some(pub_c) = hello["pub"].as_str().and_then(unb64_arr::<32>) else { return fail(tx, "protocol").await };
         if core.pairing.candidates(kind).is_empty() {
             return fail(tx, "expired").await;
@@ -230,7 +234,7 @@ struct Ctx {
 pub async fn run(core: Arc<Core>, wire: Wire) {
     let Wire { tx: wire_tx, rx: mut wire_rx, via, peer, loopback } = wire;
     let mut tx = Tx { wire: wire_tx, chan: None, rtc: None, rtc_ctl: None, rtc_fast: None, rtc_open: false };
-    let role = match tokio::time::timeout(Duration::from_secs(20), handshake(&core, &mut tx, &mut wire_rx, loopback)).await {
+    let role = match tokio::time::timeout(Duration::from_secs(20), handshake(&core, &mut tx, &mut wire_rx, loopback, via)).await {
         Ok(Some(r)) => r,
         _ => return,
     };

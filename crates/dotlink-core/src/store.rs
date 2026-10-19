@@ -115,9 +115,7 @@ impl Default for Settings {
 pub struct Config {
     pub pc_id: String,
     pub pc_name: String,
-    /// комната на ретрансляторе: телефон и ПК встречаются в ней (неугадываемый id)
-    pub room: String,
-    /// доказательство, что комнатой владеет этот ПК (ретранслятор видит только хэш)
+    /// секрет комнаты на ретрансляторе; сама комната — его хэш (`Config::room`)
     pub room_secret: String,
     pub devices: Vec<Device>,
     pub macros: Vec<Macro>,
@@ -129,12 +127,18 @@ impl Default for Config {
         Self {
             pc_id: crate::util::b64url(&crate::crypto::random::<9>()),
             pc_name: crate::util::hostname(),
-            room: crate::util::b64url(&crate::crypto::random::<16>()),
             room_secret: crate::util::b64url(&crate::crypto::random::<24>()),
             devices: vec![],
             macros: default_macros(),
             settings: Settings::default(),
         }
+    }
+}
+
+impl Config {
+    /// Комната на ретрансляторе: телефон и ПК встречаются в ней (неугадываемый id).
+    pub fn room(&self) -> String {
+        crate::crypto::room_id(&self.room_secret)
     }
 }
 

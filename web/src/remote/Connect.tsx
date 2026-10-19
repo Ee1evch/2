@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { Button, DotDisplay, DotField, DotIcon, IconButton, Sheet, StatusDot, toast } from '../ui'
-import { AuthError, loadSaved, parsePairUrl, type SavedPc } from '../lib/link'
+import { AuthError, loadSaved, pairAuth, parsePairUrl, type SavedPc } from '../lib/link'
+import { applyContext } from './continuity'
 import { cameraAvailable, QrScanner } from '../lib/qrscan'
 import { timeAgo } from '../lib/format'
 import { discover, isNative, type FoundPc } from './native'
@@ -71,7 +72,8 @@ export function Connect({ error, onDone }: { error?: string | null; onDone: () =
   const viaQr = (text: string) => {
     const p = parsePairUrl(text)
     if (!p) { setErr('Это не QR DotLink'); return }
-    void run('qr', () => link.connect({ kind: 'qr', secret: p.secret, routes: p.routes }, p.hosts))
+    const { auth, hosts } = pairAuth(p)
+    void run('qr', () => link.connect(auth, hosts).then(() => { if (p.go) void applyContext(p.go) }))
   }
   const pick = (f: FoundPc) => {
     const host = `${f.host}:${f.port}`
@@ -87,7 +89,7 @@ export function Connect({ error, onDone }: { error?: string | null; onDone: () =
         <div class="connect-hero-in" data-dots-avoid>
           <DotDisplay text="DOTLINK" pitch={5} />
           <h1 class="title">Пульт<br />для вашего ПК</h1>
-          <p class="sub">Тачпад, клавиатура, музыка, питание и файлы — по Wi-Fi, хотспоту или USB. Интернет не нужен.</p>
+          <p class="sub">Тачпад, клавиатура, музыка, экран телефона и файлы — по Wi-Fi, через интернет из любой сети или по Bluetooth.</p>
         </div>
       </div>
 

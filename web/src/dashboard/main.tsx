@@ -34,7 +34,14 @@ async function toOutbox(name: string, body: Blob): Promise<string> {
 const KIND_ICON: Record<string, IconName> = { wifi: 'wifi', lan: 'link', usb: 'usb', hotspot: 'hotspot', other: 'link' }
 const KIND_LABEL: Record<string, string> = { wifi: 'Wi-Fi', lan: 'Кабель', usb: 'USB-модем', hotspot: 'Хотспот', other: 'Сеть' }
 
+/** Дописать к QR ссылку или текст: телефон подключится и сразу откроет/скопирует их. */
+export function withContext(url: string, go: string): string {
+  const v = go.trim()
+  return v ? `${url}&go=${encodeURIComponent(v.slice(0, 600))}` : url
+}
+
 function Pairing() {
+  const [go, setGo] = useState('')
   const p = link.get<any>('pairing').value
   const net = link.get<any>('net').value
   const devices = link.get<any[]>('devices').value || []
@@ -54,7 +61,7 @@ function Pairing() {
           </div>
         </div>
         <div class="pair-card" data-dots-avoid>
-          {p ? <QrDots text={p.url} size={208} /> : <div class="qr-ph" />}
+          {p ? <QrDots text={withContext(p.url, go)} size={208} /> : <div class="qr-ph" />}
           <div class="pair-meta">
             <span class="label">PIN</span>
             <DotDisplay text={p ? `${p.pin.slice(0, 3)} ${p.pin.slice(3)}` : '--- ---'} pitch={5} />
@@ -62,6 +69,10 @@ function Pairing() {
             <Button size="sm" variant="ghost" icon="restart" onClick={() => cmd('pair-refresh')}>Новый код</Button>
           </div>
           <p class="small muted pair-how">Наведите камеру телефона на QR — откроется пульт. В приложении DotLink для Android можно ввести PIN.</p>
+          <label class="pair-go">
+            <span class="label">Передать вместе с QR</span>
+            <input class="input" placeholder="Ссылка или текст — откроется на телефоне" value={go} onInput={(e) => setGo((e.target as HTMLInputElement).value)} />
+          </label>
         </div>
         <div class="addrs" data-dots-avoid>
           <span class="label">Адреса ПК</span>
@@ -86,6 +97,8 @@ function Pairing() {
 
 const PERMS: [string, string][] = [['input', 'Мышь и клавиатура'], ['media', 'Звук и музыка'], ['power', 'Питание'], ['macros', 'Макросы'], ['clipboard', 'Буфер обмена'], ['files', 'Файлы']]
 
+const VIA: Record<string, string> = { lan: 'Wi-Fi', relay: 'Интернет', bt: 'Bluetooth' }
+
 function Devices({ compact }: { compact?: boolean }) {
   const list = link.get<any[]>('devices').value || []
   const [open, setOpen] = useState<string | null>(null)
@@ -96,7 +109,7 @@ function Devices({ compact }: { compact?: boolean }) {
         <div key={d.id} class={'dev' + (open === d.id ? ' open' : '')}>
           <button type="button" class="dev-row" onClick={() => setOpen(open === d.id ? null : d.id)}>
             <DotIcon name="phone" size={18} />
-            <span class="grow"><b>{d.name}</b><small class="muted">{d.online ? `в сети · ${d.addr}${d.rtt ? ` · ${d.rtt} мс` : ''}` : `был ${timeAgo(d.last_seen)}`}</small></span>
+            <span class="grow"><b>{d.name}</b><small class="muted">{d.online ? `${VIA[d.via] || 'в сети'}${d.p2p ? ' · напрямую' : ''} · ${d.addr}${d.rtt ? ` · ${d.rtt} мс` : ''}` : `был ${timeAgo(d.last_seen)}`}</small></span>
             <StatusDot state={d.online ? 'ok' : 'off'} live={d.online} />
           </button>
           {open === d.id && !compact && (
@@ -217,6 +230,7 @@ function Settings() {
       <Toggle checked={s.clip_sync} onChange={(v) => set('clip_sync', v)} label="Буфер обмена → телефон" hint="Скопированный на ПК текст сразу виден на телефоне" />
       <Toggle checked={s.notify} onChange={(v) => set('notify', v)} label="Уведомления" hint="О новых устройствах и принятых файлах" />
     </Card>
+    <Connectivity s={s} set={set} />
     <Card label="Компьютер" icon="desktop" span={2}>
       <label class="field"><span class="label">Имя в списке на телефоне</span>
         <input class="input" value={pc?.name || ''} onChange={(e) => cmd('pc-rename', { name: (e.target as HTMLInputElement).value })} />
@@ -228,6 +242,41 @@ function Settings() {
       <p class="muted small" style={{ margin: 0 }}>Чтобы управлять окнами, запущенными от администратора, запустите DotLink от имени администратора: Windows не даёт обычным программам нажимать в таких окнах.</p>
     </Card>
   </>
+}
+
+/** STUN/TURN построчно: `stun:host:port` или `turn:логин:пароль@host:port`. */
+export function parseIce(text: string): { urls: string[]; username?: string; credential?: string }[] {
+  return text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+    const m = l.match(/^(turns?):([^:@]+):([^@]+)@(.+)$/)
+    return m ? { urls: [`${m[1]}:${m[4]}`], username: m[2], credential: m[3] } : { urls: [l] }
+  })
+}
+export function iceText(list: { urls: string[]; username?: string; credential?: string }[]): string {
+  return list.flatMap((s) => s.urls.map((u) => (s.username ? u.replace(/^(turns?):/, `$1:${s.username}:${s.credential}@`) : u))).join('\n')
+}
+
+const RELAY_STATE: Record<string, [string, 'ok' | 'warn' | 'err' | 'off']> = {
+  online: ['Комната открыта', 'ok'], connecting: ['Подключение', 'warn'], error: ['Нет связи', 'err'], off: ['Выключен', 'off'],
+}
+
+function Connectivity({ s, set }: { s: any; set: (k: string, v: unknown) => void }) {
+  const relay = link.get<any>('relay').value
+  const bt = link.get<any>('bt').value
+  const [st, label] = [RELAY_STATE[relay?.state || 'off'][1], RELAY_STATE[relay?.state || 'off'][0]]
+  return (
+    <Card label="Связь из любой сети" icon="link" span={2}>
+      <label class="field"><span class="label">Ретранслятор · {label}{relay?.msg ? ` · ${relay.msg}` : ''}</span>
+        <div class="row"><StatusDot state={st} live={st === 'ok'} />
+          <input class="input grow" placeholder="wss://relay.example.com" defaultValue={s.relay_url} onChange={(e) => set('relay_url', (e.target as HTMLInputElement).value.trim())} />
+        </div>
+      </label>
+      <p class="muted small" style={{ margin: 0 }}>Телефон в мобильном интернете или другой сети найдёт ПК через ретранслятор, а затем по возможности соединится напрямую (WebRTC). Свой ретранслятор — docs/RELAY.md; данные идут сквозным шифром.</p>
+      <label class="field"><span class="label">STUN / TURN для прямого канала</span>
+        <textarea class="input" rows={3} defaultValue={iceText(s.ice_servers || [])} onChange={(e) => set('ice_servers', parseIce((e.target as HTMLTextAreaElement).value))} />
+      </label>
+      <Toggle checked={s.bluetooth} onChange={(v) => set('bluetooth', v)} label="Bluetooth" hint={bt?.state === 'online' ? `Ждёт телефон · ${bt.addr || 'адаптер найден'}` : bt?.msg || 'Связь без Wi-Fi и интернета (нужен Bluetooth на ПК)'} />
+    </Card>
+  )
 }
 
 // ───────── каркас ─────────

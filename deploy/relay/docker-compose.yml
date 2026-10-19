@@ -1,0 +1,21 @@
+# Ретранслятор с HTTPS: Caddy сам получит сертификат Let's Encrypt для вашего домена.
+#   RELAY_DOMAIN=relay.example.com docker compose -f deploy/relay/docker-compose.yml up -d
+# В дашборде DotLink → Настройки → «Ретранслятор»: wss://relay.example.com
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: deploy/relay/Dockerfile
+    restart: unless-stopped
+    command: ["--max-pipes", "8", "--rate-mbit", "64"]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?укажите домен ретранслятора}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+volumes:
+  caddy-data:

@@ -5,10 +5,20 @@ import { setHaptics, toast } from '../ui'
 
 export const link = new Link()
 
-export interface Prefs extends PadPrefs { haptics: boolean }
+export interface Prefs extends PadPrefs {
+  haptics: boolean
+  /** скопированное на телефоне уходит в буфер ПК */
+  clipAuto: boolean
+  /** уведомления телефона видны на ПК */
+  notifs: boolean
+  /** виджеты на главном экране — по порядку */
+  widgets: string[]
+}
+export const DEFAULT_WIDGETS = ['link', 'media', 'volume', 'sys', 'clip', 'actions', 'window', 'timer']
 const KEY = 'dotlink.prefs'
 function load(): Prefs {
-  try { return { ...DEFAULT_PREFS, haptics: true, ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return { ...DEFAULT_PREFS, haptics: true } }
+  const base: Prefs = { ...DEFAULT_PREFS, haptics: true, clipAuto: true, notifs: true, widgets: DEFAULT_WIDGETS }
+  try { return { ...base, ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return base }
 }
 export const prefs = signal<Prefs>(load())
 effect(() => {

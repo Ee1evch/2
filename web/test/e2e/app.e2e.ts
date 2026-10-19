@@ -1,6 +1,6 @@
 // Сквозная проверка на настоящем ядре (имитация ПК) и настоящем браузере:
 // сопряжение по QR → тачпад, клавиатура, громкость, медиа → файлы → дашборд → QR-поток → отзыв устройства.
-// Запуск: npm run build && cargo build -p dotlink-server && npm run e2e
+// Запуск: npm run build && cargo build -p dotlink-server -p dotlink-relay && npm run e2e
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -170,7 +170,7 @@ describe('DotLink e2e', () => {
     dash.on('pageerror', (e) => console.error('dash:', e.message))
     await dash.goto(`http://127.0.0.1:${port}/dashboard/#admin=${adminToken}`)
     await dash.getByText('Pixel 8').waitFor()
-    await dash.getByText(/в сети/).waitFor()
+    await dash.getByText(/Wi-Fi · напрямую/).waitFor() // путь и прямой канал видны на ПК
     await shot(dash, 'dashboard')
     await dash.getByRole('tab', { name: 'Файлы' }).click()
     const chooser = dash.waitForEvent('filechooser')

@@ -67,3 +67,4 @@ windows-core = "0.61"
 windows-future = "0.2"
 
 [dev-dependencies]
+dotlink-relay = { path = "../dotlink-relay" }

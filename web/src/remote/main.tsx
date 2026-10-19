@@ -1,7 +1,8 @@
 import { render } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import { Chip, TabBar, Toasts } from '../ui'
-import { AuthError, loadSaved, parsePairUrl } from '../lib/link'
+import { AuthError, loadSaved, pairAuth, parsePairUrl } from '../lib/link'
+import { applyContext } from './continuity'
 import { Connect, explain } from './Connect'
 import { Files } from './Files'
 import { Home } from './Home'
@@ -36,8 +37,9 @@ function App() {
     if (pair) {
       // открыто системной камерой по QR с экрана ПК
       history.replaceState(null, '', location.pathname)
-      link.connect({ kind: 'qr', secret: pair.secret, routes: pair.routes }, servedFromPc ? [...new Set([location.host, ...pair.hosts])] : pair.hosts)
-        .then(() => setView('main'), (e) => { setErr(explain(e)); setView('connect') })
+      const { auth, hosts } = pairAuth(pair, servedFromPc ? [location.host] : [])
+      link.connect(auth, hosts)
+        .then(() => { setView('main'); if (pair.go) void applyContext(pair.go) }, (e) => { setErr(explain(e)); setView('connect') })
       return
     }
     const cur = loadSaved()[0]

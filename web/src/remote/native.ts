@@ -69,6 +69,8 @@ export async function saveBytes(bytes: Uint8Array, name: string, type: string): 
 
 /** Скопировать текст в буфер телефона (navigator.clipboard работает только в защищённом контексте). */
 export async function copyText(text: string): Promise<boolean> {
+  const p = plugin('DotLink')
+  if (p) { try { await p.writeClipboard({ text }); return true } catch { /* ниже — запасной путь */ } }
   try { await navigator.clipboard.writeText(text); return true } catch { /* ниже — запасной путь */ }
   const t = document.createElement('textarea')
   t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'
@@ -80,4 +82,18 @@ export async function copyText(text: string): Promise<boolean> {
 
 export async function readText(): Promise<string | null> {
   try { return await navigator.clipboard.readText() } catch { return null }
+}
+
+/** Открыть ссылку: в APK — в приложении по умолчанию (браузер, YouTube…), в браузере — новой вкладкой. */
+export async function openUrl(url: string): Promise<void> {
+  const p = plugin('DotLink')
+  if (p) { await p.openUrl({ url }); return }
+  window.open(url, '_blank', 'noopener')
+}
+
+/** Текст из буфера телефона. Android отдаёт буфер только приложению на экране — читаем при возвращении в него. */
+export async function readClip(): Promise<string | null> {
+  const p = plugin('DotLink')
+  if (p) { try { return (await p.readClipboard()).text ?? null } catch { return null } }
+  return readText()
 }
