@@ -96,7 +96,7 @@ function Pairing() {
 
 // ───────── устройства ─────────
 
-const PERMS: [string, string][] = [['input', 'Мышь и клавиатура'], ['media', 'Звук и музыка'], ['power', 'Питание'], ['macros', 'Макросы'], ['clipboard', 'Буфер обмена'], ['files', 'Файлы']]
+const PERMS: [string, string][] = [['input', 'Мышь и клавиатура'], ['media', 'Звук и музыка'], ['power', 'Питание'], ['macros', 'Макросы'], ['clipboard', 'Буфер обмена'], ['files', 'Файлы'], ['screen', 'Экран ПК']]
 
 const VIA: Record<string, string> = { lan: 'Wi-Fi', relay: 'Интернет', bt: 'Bluetooth' }
 

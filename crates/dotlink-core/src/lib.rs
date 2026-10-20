@@ -13,6 +13,7 @@ pub mod platform;
 pub mod proto;
 pub mod relay;
 pub mod rtc;
+pub mod screen;
 pub mod server;
 pub mod session;
 pub mod store;

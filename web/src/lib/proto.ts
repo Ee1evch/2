@@ -1,6 +1,6 @@
 // Бинарные кадры частых событий — зеркало crates/dotlink-core/src/proto.rs.
 
-export const OP = { MOVE: 1, SCROLL: 2, BUTTON: 3, KEY: 4, TEXT: 5, CHORD: 6, VOLUME: 7, PING: 8, MOVE_T: 9, MIRROR: 0x0a, UC_MOVE: 0x20, UC_BUTTON: 0x21, UC_SCROLL: 0x22 } as const
+export const OP = { MOVE: 1, SCROLL: 2, BUTTON: 3, KEY: 4, TEXT: 5, CHORD: 6, VOLUME: 7, PING: 8, MOVE_T: 9, MIRROR: 0x0a, FILE: 0x0b, SCREEN: 0x0c, POINTER: 0x0d, UC_MOVE: 0x20, UC_BUTTON: 0x21, UC_SCROLL: 0x22 } as const
 
 const i16 = (v: number) => Math.max(-32768, Math.min(32767, Math.round(v)))
 
@@ -21,6 +21,18 @@ export function moveTFrame(qx: number, qy: number, t: number): Uint8Array {
   b[0] = OP.MOVE_T
   d.setInt16(1, i16(qx), true); d.setInt16(3, i16(qy), true)
   d.setUint32(5, Math.round(t) >>> 0, true)
+  return b
+}
+export type PointerAction = 'move' | 'down' | 'up' | 'click' | 'right' | 'double'
+const PTR: Record<PointerAction, number> = { move: 0, down: 1, up: 2, click: 3, right: 4, double: 5 }
+/** Указатель на экране ПК: x, y — доли монитора 0..1. */
+export function pointerFrame(fx: number, fy: number, a: PointerAction): Uint8Array {
+  const b = new Uint8Array(6)
+  const d = new DataView(b.buffer)
+  b[0] = OP.POINTER
+  d.setUint16(1, Math.round(Math.max(0, Math.min(1, fx)) * 65535), true)
+  d.setUint16(3, Math.round(Math.max(0, Math.min(1, fy)) * 65535), true)
+  b[5] = PTR[a]
   return b
 }
 /** v, h — единицы колеса Windows (120 = щелчок); дробные — плавная прокрутка. */

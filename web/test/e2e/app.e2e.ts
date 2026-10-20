@@ -167,6 +167,38 @@ describe('DotLink e2e', () => {
     expect(ev.find((e: any) => e.open).open).toBe('code.exe')
   })
 
+  it('экран ПК на телефоне: живая картинка, касание — клик в этой точке', async () => {
+    const before = (await events()).length
+    await phone.getByRole('tab', { name: 'Экран' }).click()
+    // кадр пришёл и нарисован: основной монитор 1920×1080, уменьшенный
+    const size = await waitFor(() => phone.evaluate(() => {
+      const c = document.querySelector('.scr-cv') as HTMLCanvasElement
+      return c.width > 100 && [c.width, c.height]
+    }), 8000)
+    expect(size[0] / size[1]).toBeCloseTo(16 / 9, 1)
+    // в центре кадра — светлое окно синтетического рабочего стола
+    const px = await phone.evaluate(() => {
+      const c = document.querySelector('.scr-cv') as HTMLCanvasElement
+      return [...c.getContext('2d')!.getImageData(c.width * 0.45, c.height * 0.4, 1, 1).data]
+    })
+    expect(px[0]).toBeGreaterThan(200)
+    // касание в точке (25%, 75%) картинки — клик в той же точке монитора
+    const box = (await phone.locator('.scr-cv').boundingBox())!
+    await phone.evaluate(({ x, y }) => {
+      const el = document.querySelector('.scr-box')!
+      const ev = (type: string) => el.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: 'touch', clientX: x, clientY: y, bubbles: true }))
+      ev('pointerdown'); ev('pointerup')
+    }, { x: box.x + box.width * 0.25, y: box.y + box.height * 0.75 })
+    const ev = await waitFor(async () => { const e = (await events()).slice(before); return e.some((x) => x.to) && e })
+    const to = ev.find((e: any) => e.to).to
+    expect(Math.abs(to[0] - 480)).toBeLessThan(8)
+    expect(Math.abs(to[1] - 810)).toBeLessThan(8)
+    expect(ev.some((e: any) => e.button === 'Left' && e.action === 'Click')).toBe(true)
+    await phone.waitForTimeout(300)
+    await shot(phone, 'phone-screen')
+    await phone.getByRole('tab', { name: 'Пульт' }).click()
+  })
+
   it('громкость и музыка синхронизируются с ПК', async () => {
     await phone.getByRole('tab', { name: 'Пульт' }).click()
     const slider = phone.getByRole('slider', { name: 'Громкость ПК' })

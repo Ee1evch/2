@@ -100,6 +100,23 @@ pub struct WindowInfo {
     pub app: String,
 }
 
+/// Монитор ПК в координатах виртуального рабочего стола.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Monitor {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+    pub primary: bool,
+}
+
+/// Снимок монитора, уже уменьшенный до нужной ширины: BGRA, строки сверху вниз, курсор нарисован.
+pub struct Shot {
+    pub w: u32,
+    pub h: u32,
+    pub bgra: Vec<u8>,
+}
+
 pub trait Platform: Send + Sync + 'static {
     fn name(&self) -> &'static str;
 
@@ -156,6 +173,16 @@ pub trait Platform: Send + Sync + 'static {
     fn focus_window(&self, _id: u64) {}
     /// Действие над активным окном: свернуть, развернуть, закрыть, разложить, на другой монитор.
     fn window_action(&self, _action: &str) {}
+    /// Мониторы ПК (первый — основной). Пусто — экран ПК показать нельзя.
+    fn monitors(&self) -> Vec<Monitor> {
+        vec![]
+    }
+    /// Снимок монитора шириной не больше `max_w` (вызывается из рабочего потока).
+    fn screenshot(&self, _monitor: &Monitor, _max_w: u32) -> Option<Shot> {
+        None
+    }
+    /// Курсор — в точку виртуального рабочего стола (пиксели), для касаний по экрану ПК на телефоне.
+    fn mouse_to(&self, _x: i32, _y: i32) {}
     /// Журнал имитации — для e2e-тестов; у настоящей платформы его нет.
     fn debug_log(&self) -> Option<serde_json::Value> {
         None

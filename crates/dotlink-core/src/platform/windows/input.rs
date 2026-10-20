@@ -81,6 +81,24 @@ impl Input {
         *last = Some((x, y, Instant::now()));
     }
 
+    /// Курсор — в точку виртуального рабочего стола (касание по экрану ПК на телефоне).
+    pub fn mouse_to(&self, x: i32, y: i32) {
+        let (vx, vy, vw, vh) = unsafe {
+            (
+                GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1),
+                GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1),
+            )
+        };
+        let x = x.clamp(vx, vx + vw - 1);
+        let y = y.clamp(vy, vy + vh - 1);
+        let nx = (((x - vx) as i64 * 65536 + vw as i64 - 1) / vw as i64).min(65535) as i32;
+        let ny = (((y - vy) as i64 * 65536 + vh as i64 - 1) / vh as i64).min(65535) as i32;
+        send(&[mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, nx, ny, 0)]);
+        *self.last.lock() = Some((x, y, Instant::now()));
+    }
+
     pub fn button(&self, b: MouseButton, a: ButtonAction) {
         let (down, up, data) = match b {
             MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, 0),

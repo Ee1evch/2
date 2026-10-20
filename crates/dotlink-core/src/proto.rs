@@ -33,6 +33,11 @@ pub mod op {
     /// часть файла внутри сессии (через ретранслятор или Bluetooth, где нет прямого HTTP):
     /// u8 вид (0 данные, 1 конец, 2 отмена), u8 длина билета, билет, данные
     pub const FILE: u8 = 0x0B;
+    /// ПК → телефон: кадр экрана ПК — u8 монитор, u16 w, u16 h, JPEG
+    pub const SCREEN: u8 = 0x0C;
+    /// телефон → ПК: указатель на экране ПК — u16 x, u16 y (доли монитора × 65535), u8 действие
+    /// (0 только курсор, 1 нажать, 2 отпустить, 3 клик, 4 правый клик, 5 двойной клик)
+    pub const POINTER: u8 = 0x0D;
 
     // ПК → телефон: мышь ПК управляет телефоном (как Universal Control)
     /// i16 dx, i16 dy — в пикселях ПК
@@ -105,6 +110,11 @@ pub enum Frame {
         id: String,
         data: Vec<u8>,
     },
+    Pointer {
+        x: u16,
+        y: u16,
+        action: u8,
+    },
     Json(serde_json::Value),
 }
 
@@ -162,6 +172,7 @@ pub fn decode(b: &[u8]) -> Result<Frame, BadFrame> {
         op::PING => Frame::Ping(u32::from_le_bytes(b.get(1..5).ok_or(BadFrame)?.try_into().unwrap())),
         op::MOVE_T => Frame::MoveT { dx: i16_at(b, 1)?, dy: i16_at(b, 3)?, t: u32::from_le_bytes(b.get(5..9).ok_or(BadFrame)?.try_into().unwrap()) },
         op::MIRROR if b.len() > 10 => Frame::Mirror(b.to_vec()),
+        op::POINTER => Frame::Pointer { x: u16_at(b, 1)?, y: u16_at(b, 3)?, action: *b.get(5).ok_or(BadFrame)? },
         op::FILE => {
             let n = *b.get(2).ok_or(BadFrame)? as usize;
             let id = std::str::from_utf8(b.get(3..3 + n).ok_or(BadFrame)?).map_err(|_| BadFrame)?.to_string();
@@ -188,6 +199,16 @@ pub fn uc_scroll(v: i16, h: i16) -> Vec<u8> {
     b.extend_from_slice(&v.to_le_bytes());
     b.extend_from_slice(&h.to_le_bytes());
     b
+}
+
+pub fn screen_frame(monitor: u8, w: u16, h: u16, jpeg: &[u8]) -> Vec<u8> {
+    let mut v = Vec::with_capacity(6 + jpeg.len());
+    v.push(op::SCREEN);
+    v.push(monitor);
+    v.extend_from_slice(&w.to_le_bytes());
+    v.extend_from_slice(&h.to_le_bytes());
+    v.extend_from_slice(jpeg);
+    v
 }
 
 pub fn file_frame(kind: u8, id: &str, data: &[u8]) -> Vec<u8> {
@@ -299,6 +320,19 @@ pub enum RemoteCmd {
     },
     /// курсор ПК ушёл с края экрана телефона — вернуть управление ПК
     UcExit,
+    /// экран ПК на телефоне: включить/выключить поток, монитор, ширина кадра, качество JPEG 30..90
+    Screen {
+        on: bool,
+        #[serde(default)]
+        monitor: usize,
+        #[serde(default)]
+        max: Option<u32>,
+        #[serde(default)]
+        q: Option<u8>,
+    },
+    /// телефон показал кадр экрана — можно слать следующий
+    #[serde(rename = "screen-ack")]
+    ScreenAck,
     /// скачать предложенный файл внутри сессии (когда HTTP до ПК недоступен)
     FileGet {
         ticket: String,

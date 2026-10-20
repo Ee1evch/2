@@ -6,6 +6,7 @@ mod bt;
 mod capture;
 mod input;
 mod media;
+mod screen;
 mod system;
 
 use super::*;
@@ -124,6 +125,15 @@ impl Platform for WindowsPlatform {
     }
     fn bluetooth(&self, on: bool, accept: BtAccept) -> anyhow::Result<Option<String>> {
         bt::set(on, accept)
+    }
+    fn monitors(&self) -> Vec<Monitor> {
+        screen::monitors()
+    }
+    fn screenshot(&self, monitor: &Monitor, max_w: u32) -> Option<Shot> {
+        screen::shot(monitor, max_w)
+    }
+    fn mouse_to(&self, x: i32, y: i32) {
+        self.input.mouse_to(x, y);
     }
     fn launchables(&self) -> Vec<Launchable> {
         apps::launchables()

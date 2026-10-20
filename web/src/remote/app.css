@@ -102,3 +102,16 @@ input, textarea, .clip-text { -webkit-user-select:text; user-select:text; }
 .pal-item small { font-size:12px; }
 .pal-item.sel, .pal-item:active { background:var(--surface-2); }
 .pal-item.sel { box-shadow:inset 2px 0 0 var(--accent); }
+
+/* ───────── экран ПК ───────── */
+.tab-screen .r-main { display:flex; padding-bottom:calc(92px + var(--safe-b)); }
+.scr-view { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px; min-height:calc(100dvh - 170px - var(--safe-t) - var(--safe-b)); }
+.scr-box { position:relative; flex:1; min-height:220px; border-radius:var(--r-l); background:#000; box-shadow:inset 0 0 0 1px var(--border); overflow:hidden; touch-action:none; -webkit-touch-callout:none; user-select:none; }
+.scr-cv { position:absolute; left:0; top:0; transform-origin:0 0; image-rendering:auto; will-change:transform; }
+.scr-wait { position:absolute; inset:0; display:grid; place-content:center; justify-items:center; gap:10px; color:var(--muted); text-align:center; font-size:14px; }
+.scr-stat { position:absolute; right:10px; bottom:8px; padding:3px 8px; border-radius:999px; background:color-mix(in srgb, #000 55%, transparent); color:#fff; font-size:11px; pointer-events:none; }
+.scr-bar { display:flex; align-items:center; gap:8px; flex:none; }
+.scr-tool { display:grid; place-items:center; width:52px; height:48px; border-radius:var(--r-m); background:var(--surface); color:var(--muted); box-shadow:inset 0 0 0 1px var(--border); transition:background .12s, color .12s; }
+.scr-tool.on { background:var(--accent); color:var(--on-accent); box-shadow:none; }
+.scr-q { flex:1; height:48px; border-radius:var(--r-m); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); color:var(--text); font-weight:600; font-size:14px; }
+.scr-mon { color:var(--muted); font-size:13px; padding:0 4px; }

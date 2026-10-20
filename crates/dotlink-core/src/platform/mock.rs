@@ -12,7 +12,12 @@ pub struct MockPlatform {
     tx: Mutex<Option<Sender<Event>>>,
     dir: PathBuf,
     bt: Mutex<Option<BtAccept>>,
+    /// курсор на виртуальном рабочем столе — его видно на снимках экрана
+    cursor: Mutex<(i32, i32)>,
 }
+
+/// Два монитора: основной 1920×1080 и справа 1280×1024.
+const MONITORS: [Monitor; 2] = [Monitor { x: 0, y: 0, w: 1920, h: 1080, primary: true }, Monitor { x: 1920, y: 0, w: 1280, h: 1024, primary: false }];
 
 struct MockState {
     volume: f32,
@@ -54,6 +59,7 @@ impl MockPlatform {
             tx: Mutex::new(None),
             dir,
             bt: Mutex::new(None),
+            cursor: Mutex::new((960, 540)),
         }
     }
 
@@ -103,6 +109,8 @@ impl Platform for MockPlatform {
     }
     fn mouse_move(&self, dx: i32, dy: i32) {
         self.rec(serde_json::json!({"move": [dx, dy]}));
+        let mut c = self.cursor.lock();
+        *c = ((c.0 + dx).clamp(0, 3199), (c.1 + dy).clamp(0, 1079));
     }
     fn mouse_button(&self, button: MouseButton, action: ButtonAction) {
         self.rec(serde_json::json!({"button": format!("{:?}", button), "action": format!("{:?}", action)}));
@@ -262,6 +270,51 @@ impl Platform for MockPlatform {
 
     fn window_action(&self, action: &str) {
         self.rec(serde_json::json!({ "win": action }));
+    }
+
+    fn monitors(&self) -> Vec<Monitor> {
+        MONITORS.to_vec()
+    }
+
+    /// Синтетический рабочий стол: фон, окно с заголовком, панель задач, движущийся квадрат
+    /// (кадры меняются) и курсор там, куда его поставили.
+    fn screenshot(&self, m: &Monitor, max_w: u32) -> Option<Shot> {
+        let w = max_w.min(m.w).max(16) & !1;
+        let h = ((m.h as u64 * w as u64 / m.w as u64) as u32).max(16) & !1;
+        let k = w as f32 / m.w as f32;
+        let t = self.t0.elapsed().as_secs_f32();
+        let (cx, cy) = *self.cursor.lock();
+        let (cx, cy) = (((cx - m.x) as f32 * k) as i32, ((cy - m.y) as f32 * k) as i32);
+        let bx = ((t * 120.0) as u32 % (w.max(80) - 40)) as i32;
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                let fx = x as f32 / w as f32;
+                let fy = y as f32 / h as f32;
+                let mut c = [(40.0 + 60.0 * fy) as u8, (20.0 + 30.0 * fx) as u8, (60.0 + 90.0 * fx) as u8];
+                let (wx0, wy0, wx1, wy1) = ((w as f32 * 0.18) as i32, (h as f32 * 0.14) as i32, (w as f32 * 0.72) as i32, (h as f32 * 0.70) as i32);
+                if x >= wx0 && x < wx1 && y >= wy0 && y < wy1 {
+                    c = if y < wy0 + (h as i32 / 22).max(3) { [60, 60, 66] } else { [236, 236, 240] };
+                }
+                if y >= h as i32 - (h as i32 / 18).max(3) {
+                    c = [24, 24, 28];
+                }
+                if (x - bx).abs() < 18 && (y - h as i32 / 2).abs() < 18 {
+                    c = [51, 68, 255]; // BGR: акцентный красный
+                }
+                if (x - cx).abs() <= 4 && (y - cy).abs() <= 4 {
+                    c = if (x - cx).abs() == 4 || (y - cy).abs() == 4 { [0, 0, 0] } else { [255, 255, 255] };
+                }
+                let i = ((y as u32 * w + x as u32) * 4) as usize;
+                px[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        Some(Shot { w, h, bgra: px })
+    }
+
+    fn mouse_to(&self, x: i32, y: i32) {
+        self.rec(serde_json::json!({ "to": [x, y] }));
+        *self.cursor.lock() = (x, y);
     }
 
     fn downloads_dir(&self) -> PathBuf {

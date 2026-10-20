@@ -17,7 +17,7 @@ import { RtcLink, rtcSupported, type IceServer, type SessionKeys } from './rtc'
 
 export type { Via } from './pipe'
 
-export interface Perms { input: boolean; media: boolean; power: boolean; macros: boolean; clipboard: boolean; files: boolean }
+export interface Perms { input: boolean; media: boolean; power: boolean; macros: boolean; clipboard: boolean; files: boolean; screen: boolean }
 
 /** Как ещё можно добраться до ПК, кроме локальной сети. */
 export interface Routes { relay?: { url: string; room: string } | null; bt?: string | null; ice?: IceServer[] }

@@ -613,6 +613,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "if-addrs",
+ "jpeg-encoder",
  "mdns-sd",
  "mime_guess",
  "parking_lot",
@@ -1134,6 +1135,12 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
+name = "jpeg-encoder"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b454d911ac55068f53495488d8ccd0646eaa540c033a28ee15b07838afafb01f"
 
 [[package]]
 name = "js-sys"

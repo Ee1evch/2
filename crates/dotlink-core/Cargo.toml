@@ -32,6 +32,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 webrtc = "0.21"
 async-trait = "0.1"
 bytes = "1"
+jpeg-encoder = "0.6"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 [target.'cfg(windows)'.dependencies]

@@ -38,7 +38,7 @@ link.on('file-offer', (m) => {
   toast(`ПК отправляет «${m.name}»`)
 })
 
-const DENIED: Record<string, string> = { input: 'Ввод запрещён на ПК', media: 'Медиа запрещены на ПК', power: 'Питание запрещено на ПК', macros: 'Макросы запрещены на ПК', clipboard: 'Буфер запрещён на ПК', files: 'Файлы запрещены на ПК' }
+const DENIED: Record<string, string> = { input: 'Ввод запрещён на ПК', media: 'Медиа запрещены на ПК', power: 'Питание запрещено на ПК', macros: 'Макросы запрещены на ПК', clipboard: 'Буфер запрещён на ПК', files: 'Файлы запрещены на ПК', screen: 'Показ экрана запрещён на ПК' }
 let lastDenied = 0
 link.on('denied', (m) => { if (Date.now() - lastDenied > 2000) { lastDenied = Date.now(); toast(DENIED[m.what] || 'Нет доступа', 'err') } })
 link.on('error', (m) => { if (m.msg) toast(m.msg, 'err') })

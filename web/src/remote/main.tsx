@@ -9,15 +9,17 @@ import { Connect, explain } from './Connect'
 import { Files } from './Files'
 import { Home } from './Board'
 import { Pad } from './Pad'
+import { Screen } from './Screen'
 import { System } from './System'
 import { link, servedFromPc } from './state'
 import { LinkCtx } from '../lib/linkctx'
 import './app.css'
 
-type Tab = 'home' | 'pad' | 'files' | 'system'
+type Tab = 'home' | 'pad' | 'screen' | 'files' | 'system'
 const TABS = [
   { id: 'home' as const, icon: 'home' as const, label: 'Пульт' },
   { id: 'pad' as const, icon: 'pad' as const, label: 'Тачпад' },
+  { id: 'screen' as const, icon: 'display' as const, label: 'Экран' },
   { id: 'files' as const, icon: 'files' as const, label: 'Файлы' },
   { id: 'system' as const, icon: 'power' as const, label: 'Система' },
 ]
@@ -85,6 +87,7 @@ function App() {
       <main class="r-main">
         {tab === 'home' && <Home />}
         {tab === 'pad' && <Pad />}
+        {tab === 'screen' && <Screen />}
         {tab === 'files' && <Files />}
         {tab === 'system' && <System onSwitch={() => { link.disconnect(); setView('connect') }} />}
       </main>

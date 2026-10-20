@@ -232,6 +232,8 @@ struct Upload {
 struct Ctx {
     sid: u64,
     out: mpsc::Sender<Out>,
+    /// поток экрана ПК на этот телефон (создаётся по первому запросу)
+    screen: Option<crate::screen::Screen>,
     uploads: std::collections::HashMap<String, Upload>,
     admin: bool,
     device: Option<String>,
@@ -278,8 +280,21 @@ pub async fn run(core: Arc<Core>, wire: Wire) {
     // подписка до снимка: ни одно изменение не потеряется
     let mut hub_rx = core.hub.subscribe();
     let mut ok = send_snapshot(&core, &mut tx, admin, &perms).await;
-    let mut ctx =
-        Ctx { sid, out, uploads: Default::default(), admin, device, perms, keys, sub: SubPixel::default(), rtt, p2p, last_rtt_publish: 0, rtc_rx: None };
+    let mut ctx = Ctx {
+        sid,
+        out,
+        screen: None,
+        uploads: Default::default(),
+        admin,
+        device,
+        perms,
+        keys,
+        sub: SubPixel::default(),
+        rtt,
+        p2p,
+        last_rtt_publish: 0,
+        rtc_rx: None,
+    };
 
     while ok {
         tokio::select! {
@@ -393,7 +408,14 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
                 core.publish_devices();
             }
         }
-        Frame::Move { .. } | Frame::MoveT { .. } | Frame::Scroll { .. } | Frame::Button { .. } | Frame::Key { .. } | Frame::Text(_) | Frame::Chord(_)
+        Frame::Move { .. }
+        | Frame::MoveT { .. }
+        | Frame::Pointer { .. }
+        | Frame::Scroll { .. }
+        | Frame::Button { .. }
+        | Frame::Key { .. }
+        | Frame::Text(_)
+        | Frame::Chord(_)
             if !ctx.perms.input =>
         {
             return tx.json(&deny("input")).await;
@@ -421,6 +443,7 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
             }
             core.set_volume_from(level as f32 / 10_000.0, seq);
         }
+        Frame::Pointer { x, y, action } => pointer(core, ctx, x, y, action),
         Frame::File { kind, id, data } => {
             if !ctx.perms.files {
                 return tx.json(&deny("files")).await;
@@ -450,6 +473,26 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
                         tokio::task::spawn_blocking(move || core.palette()).await.unwrap_or_else(|_| json!({ "t": "palette", "apps": [], "windows": [] }));
                     return tx.json(&reply).await;
                 }
+                RemoteCmd::Screen { on, monitor, max, q } => {
+                    if !ctx.perms.screen {
+                        return tx.json(&deny("screen")).await;
+                    }
+                    let s = ctx.screen.get_or_insert_with(|| crate::screen::Screen::start(core.clone(), ctx.out.clone()));
+                    if !on {
+                        s.set(None);
+                        return true;
+                    }
+                    let opts = crate::screen::Opts::new(monitor, max, q);
+                    s.set(Some(opts));
+                    let monitors = core.platform.monitors();
+                    let idx = crate::screen::monitor(core, monitor).map_or(0, |(i, _)| i);
+                    return tx.json(&json!({ "t": "screen-info", "monitors": monitors, "monitor": idx, "max": opts.max_w, "q": opts.quality })).await;
+                }
+                RemoteCmd::ScreenAck => {
+                    if let Some(s) = &ctx.screen {
+                        s.ack();
+                    }
+                }
                 RemoteCmd::FileGet { ticket } => {
                     if !ctx.perms.files {
                         return tx.json(&deny("files")).await;
@@ -477,6 +520,25 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
         }
     }
     true
+}
+
+/// Касание по экрану ПК: курсор — в ту же точку монитора, затем действие кнопки.
+fn pointer(core: &Arc<Core>, ctx: &Ctx, x: u16, y: u16, action: u8) {
+    use crate::proto::{ButtonAction, MouseButton};
+    let idx = ctx.screen.as_ref().and_then(|s| s.current()).map_or(0, |o| o.monitor);
+    let Some((_, m)) = crate::screen::monitor(core, idx) else { return };
+    let px = m.x + (x as i64 * (m.w.max(1) - 1) as i64 / 65535) as i32;
+    let py = m.y + (y as i64 * (m.h.max(1) - 1) as i64 / 65535) as i32;
+    let p = &core.platform;
+    p.mouse_to(px, py);
+    match action {
+        1 => p.mouse_button(MouseButton::Left, ButtonAction::Down),
+        2 => p.mouse_button(MouseButton::Left, ButtonAction::Up),
+        3 => p.mouse_button(MouseButton::Left, ButtonAction::Click),
+        4 => p.mouse_button(MouseButton::Right, ButtonAction::Click),
+        5 => p.mouse_button(MouseButton::Left, ButtonAction::DoubleClick),
+        _ => {}
+    }
 }
 
 /// Часть файла от телефона: первая открывает файл по билету загрузки, «конец» — проверяет размер
@@ -704,7 +766,7 @@ fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Pe
             }
         }
         RemoteCmd::UcExit => core.uc_stop(),
-        RemoteCmd::RtcOffer { .. } | RemoteCmd::RtcIce { .. } | RemoteCmd::FileGet { .. } => {}
+        RemoteCmd::RtcOffer { .. } | RemoteCmd::RtcIce { .. } | RemoteCmd::FileGet { .. } | RemoteCmd::Screen { .. } | RemoteCmd::ScreenAck => {}
     }
     vec![]
 }

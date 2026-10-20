@@ -14,11 +14,13 @@ pub struct Perms {
     pub macros: bool,
     pub clipboard: bool,
     pub files: bool,
+    /// видеть экран ПК (управление им — по праву `input`)
+    pub screen: bool,
 }
 
 impl Default for Perms {
     fn default() -> Self {
-        Self { input: true, media: true, power: true, macros: true, clipboard: true, files: true }
+        Self { input: true, media: true, power: true, macros: true, clipboard: true, files: true, screen: true }
     }
 }
 
