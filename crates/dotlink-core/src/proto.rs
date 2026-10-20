@@ -263,6 +263,22 @@ pub enum RemoteCmd {
     OpenUrl {
         url: String,
     },
+    /// командная палитра: вернуть список приложений (меню «Пуск») и открытых окон
+    Palette,
+    /// запустить приложение по id из палитры
+    Launch {
+        id: String,
+    },
+    /// перевести окно на передний план
+    #[serde(rename = "win-focus")]
+    WinFocus {
+        id: u64,
+    },
+    /// действие над активным окном: minimize|maximize|restore|close|snap-left|snap-right|next-monitor|show-desktop
+    #[serde(rename = "win-action")]
+    WinAction {
+        a: String,
+    },
     /// уведомление с телефона — показать на ПК
     Notify {
         app: String,

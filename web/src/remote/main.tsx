@@ -1,6 +1,7 @@
 import { render } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
-import { Chip, TabBar, Toasts } from '../ui'
+import { Chip, IconButton, TabBar, Toasts } from '../ui'
+import { Palette } from './Palette'
 import { AuthError, loadSaved, pairAuth, parsePairUrl } from '../lib/link'
 import { applyContext } from './continuity'
 import './phonectl'
@@ -32,6 +33,7 @@ function App() {
   const [view, setView] = useState<'boot' | 'connect' | 'main'>('boot')
   const [tab, setTab] = useState<Tab>(() => (sessionStorage.getItem('dotlink.tab') as Tab) || 'home')
   const [err, setErr] = useState<string | null>(null)
+  const [pal, setPal] = useState(false)
 
   useEffect(() => {
     const pair = parsePairUrl(location.href)
@@ -76,8 +78,10 @@ function App() {
           <span class="label">DotLink</span>
           <b class="ellipsis">{link.pcName.value || 'ПК'}</b>
         </div>
+        <IconButton icon="search" label="Поиск на ПК" variant="flat" onClick={() => setPal(true)} />
         <Status />
       </header>
+      <Palette open={pal} onClose={() => setPal(false)} />
       <main class="r-main">
         {tab === 'home' && <Home />}
         {tab === 'pad' && <Pad />}

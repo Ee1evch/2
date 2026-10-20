@@ -1,5 +1,6 @@
 //! Windows: SendInput, Core Audio, GSMTC, питание, буфер обмена, брандмауэр, хуки для «мыши ПК на телефоне».
 
+mod apps;
 mod audio;
 mod bt;
 mod capture;
@@ -123,6 +124,31 @@ impl Platform for WindowsPlatform {
     }
     fn bluetooth(&self, on: bool, accept: BtAccept) -> anyhow::Result<Option<String>> {
         bt::set(on, accept)
+    }
+    fn launchables(&self) -> Vec<Launchable> {
+        apps::launchables()
+    }
+    fn windows(&self) -> Vec<WindowInfo> {
+        apps::windows()
+    }
+    fn focus_window(&self, id: u64) {
+        apps::focus(id);
+    }
+    fn window_action(&self, action: &str) {
+        if apps::act(action) {
+            return;
+        }
+        // раскладка и перенос — штатными сочетаниями Windows
+        const WIN: u16 = 0x5B;
+        let chord: &[u16] = match action {
+            "snap-left" => &[WIN, 0x25],
+            "snap-right" => &[WIN, 0x27],
+            "next-monitor" => &[WIN, 0x10, 0x27],
+            "show-desktop" => &[WIN, 0x44],
+            "task-view" => &[WIN, 0x09],
+            _ => return,
+        };
+        self.input.chord(chord);
     }
     fn set_edge(&self, edge: &str) {
         capture::set_edge(edge);

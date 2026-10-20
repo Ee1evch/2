@@ -149,6 +149,24 @@ describe('DotLink e2e', () => {
     await shot(phone, 'phone-widgets')
   })
 
+  it('командная палитра: окно, действие, приложение', async () => {
+    const before = (await events()).length
+    await phone.getByRole('button', { name: 'Поиск на ПК' }).click()
+    const q = phone.getByRole('searchbox', { name: 'Поиск на ПК' })
+    await q.fill('youtube')
+    await phone.getByRole('option', { name: /YouTube/ }).click()
+    await phone.getByRole('button', { name: 'Поиск на ПК' }).click()
+    await q.fill('свернуть')
+    await q.press('Enter')
+    await phone.getByRole('button', { name: 'Поиск на ПК' }).click()
+    await q.fill('vsc')
+    await phone.getByRole('option', { name: /Visual Studio Code/ }).click()
+    const ev = await waitFor(async () => { const e = (await events()).slice(before); return e.some((x) => x.open) && e })
+    expect(ev.some((e: any) => e.focus === 102)).toBe(true)
+    expect(ev.some((e: any) => e.win === 'minimize')).toBe(true)
+    expect(ev.find((e: any) => e.open).open).toBe('code.exe')
+  })
+
   it('громкость и музыка синхронизируются с ПК', async () => {
     await phone.getByRole('tab', { name: 'Пульт' }).click()
     const slider = phone.getByRole('slider', { name: 'Громкость ПК' })

@@ -440,6 +440,16 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
             let Ok(cmd) = serde_json::from_value::<RemoteCmd>(v) else { return true };
             match cmd {
                 RemoteCmd::RtcOffer { sdp } => return rtc_offer(core, tx, ctx, sdp).await,
+                RemoteCmd::Palette => {
+                    if !ctx.perms.input && !ctx.perms.macros {
+                        return tx.json(&deny("input")).await;
+                    }
+                    // сканирование меню «Пуск» и перечисление окон — в рабочем потоке
+                    let core = core.clone();
+                    let reply =
+                        tokio::task::spawn_blocking(move || core.palette()).await.unwrap_or_else(|_| json!({ "t": "palette", "apps": [], "windows": [] }));
+                    return tx.json(&reply).await;
+                }
                 RemoteCmd::FileGet { ticket } => {
                     if !ctx.perms.files {
                         return tx.json(&deny("files")).await;
@@ -663,6 +673,31 @@ fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Pe
                 core.phone_notification(d, &app, &title, &text);
             }
         }
+        RemoteCmd::Launch { id } => {
+            if !perms.input && !perms.macros {
+                return deny("input");
+            }
+            if let Err(e) = core.launch(&id) {
+                return err(e);
+            }
+            return vec![json!({ "t": "ok", "for": "launch" })];
+        }
+        RemoteCmd::WinFocus { id } => {
+            if !perms.input {
+                return deny("input");
+            }
+            core.platform.focus_window(id);
+        }
+        RemoteCmd::WinAction { a } => {
+            if !perms.input {
+                return deny("input");
+            }
+            const OK: [&str; 8] = ["minimize", "maximize", "restore", "close", "snap-left", "snap-right", "next-monitor", "show-desktop"];
+            if OK.contains(&a.as_str()) {
+                core.platform.window_action(&a);
+            }
+        }
+        RemoteCmd::Palette => {}
         RemoteCmd::Mirror { on, w, h, codec } => {
             if let Some(d) = device {
                 core.mirror_state(d, on, w, h, &codec);

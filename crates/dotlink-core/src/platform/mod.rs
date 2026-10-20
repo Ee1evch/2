@@ -81,6 +81,25 @@ pub type BtWrite = Box<dyn FnMut(&[u8]) -> std::io::Result<()> + Send>;
 
 pub type BtAccept = Arc<dyn Fn(BtConn) + Send + Sync>;
 
+/// Приложение для запуска с телефона (пункт меню «Пуск»). `target` не уходит телефону.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Launchable {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip)]
+    pub target: String,
+}
+
+/// Открытое окно ПК — телефон может переключиться на него.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WindowInfo {
+    pub id: u64,
+    pub title: String,
+    pub app: String,
+}
+
 pub trait Platform: Send + Sync + 'static {
     fn name(&self) -> &'static str;
 
@@ -125,6 +144,18 @@ pub trait Platform: Send + Sync + 'static {
     fn bluetooth(&self, _on: bool, _accept: BtAccept) -> anyhow::Result<Option<String>> {
         Ok(None)
     }
+    /// Приложения из меню «Пуск» для командной палитры. Пусто — платформа не умеет (список кэширует ядро).
+    fn launchables(&self) -> Vec<Launchable> {
+        vec![]
+    }
+    /// Открытые окна верхнего уровня (свежий список на каждый запрос палитры).
+    fn windows(&self) -> Vec<WindowInfo> {
+        vec![]
+    }
+    /// Перевести окно на передний план.
+    fn focus_window(&self, _id: u64) {}
+    /// Действие над активным окном: свернуть, развернуть, закрыть, разложить, на другой монитор.
+    fn window_action(&self, _action: &str) {}
     /// Журнал имитации — для e2e-тестов; у настоящей платформы его нет.
     fn debug_log(&self) -> Option<serde_json::Value> {
         None

@@ -229,6 +229,41 @@ impl Platform for MockPlatform {
         self.rec(serde_json::json!({ "capture": on }));
     }
 
+    fn launchables(&self) -> Vec<Launchable> {
+        const APPS: [(&str, &str, &str); 10] = [
+            ("chrome", "Google Chrome", "chrome"),
+            ("code", "Visual Studio Code", "terminal"),
+            ("explorer", "Проводник", "files"),
+            ("notepad", "Блокнот", "edit"),
+            ("terminal", "Терминал", "terminal"),
+            ("spotify", "Spotify", "media"),
+            ("calc", "Калькулятор", "cpu"),
+            ("settings", "Параметры", "settings"),
+            ("steam", "Steam", "apps"),
+            ("telegram", "Telegram", "send"),
+        ];
+        APPS.iter()
+            .map(|(id, name, icon)| Launchable { id: (*id).into(), name: (*name).into(), icon: Some((*icon).into()), target: format!("{id}.exe") })
+            .collect()
+    }
+
+    fn windows(&self) -> Vec<WindowInfo> {
+        const W: [(u64, &str, &str); 4] =
+            [(101, "DotLink — README.md", "Code"), (102, "YouTube — Google Chrome", "chrome"), (103, "Проводник", "explorer"), (104, "Telegram", "telegram")];
+        W.iter().map(|(id, title, app)| WindowInfo { id: *id, title: (*title).into(), app: (*app).into() }).collect()
+    }
+
+    fn focus_window(&self, id: u64) {
+        self.rec(serde_json::json!({ "focus": id }));
+        if let Some(w) = self.windows().into_iter().find(|w| w.id == id) {
+            self.emit(Event::Window { title: w.title, app: w.app });
+        }
+    }
+
+    fn window_action(&self, action: &str) {
+        self.rec(serde_json::json!({ "win": action }));
+    }
+
     fn downloads_dir(&self) -> PathBuf {
         self.dir.clone()
     }

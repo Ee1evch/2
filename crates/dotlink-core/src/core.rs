@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 
 /// Возможности оболочки (окно Tauri): автозапуск и системные уведомления.
@@ -93,6 +93,8 @@ pub struct Core {
     notifs: Mutex<Vec<Value>>,
     /// изменения настроек — ретранслятор и Bluetooth перезапускаются сами
     pub settings_tx: watch::Sender<Settings>,
+    /// кэш приложений меню «Пуск» для командной палитры (сканирование диска — редко)
+    apps: Mutex<Option<(Instant, Arc<Vec<crate::platform::Launchable>>)>>,
 }
 
 impl Core {
@@ -121,7 +123,40 @@ impl Core {
             clip_seq: AtomicU64::new(0),
             last_clip: Mutex::new(None),
             outbox: Mutex::new(HashMap::new()),
+            apps: Mutex::new(None),
         }
+    }
+
+    // ───────── командная палитра ─────────
+
+    /// Список приложений меню «Пуск», кэш на минуту (сканирование диска — дорогое).
+    pub fn launch_apps(&self) -> Arc<Vec<crate::platform::Launchable>> {
+        {
+            let g = self.apps.lock();
+            if let Some((at, v)) = g.as_ref() {
+                if at.elapsed() < Duration::from_secs(60) {
+                    return v.clone();
+                }
+            }
+        }
+        let v = Arc::new(self.platform.launchables());
+        *self.apps.lock() = Some((Instant::now(), v.clone()));
+        v
+    }
+
+    /// Ответ палитры: приложения (без путей) и открытые окна.
+    pub fn palette(&self) -> Value {
+        let list = self.launch_apps();
+        let apps: Vec<Value> = list.iter().map(|a| json!({ "id": a.id, "name": a.name, "icon": a.icon })).collect();
+        let windows: Vec<Value> = self.platform.windows().into_iter().map(|w| json!({ "id": w.id, "title": w.title, "app": w.app })).collect();
+        json!({ "t": "palette", "apps": apps, "windows": windows })
+    }
+
+    /// Запустить приложение палитры по id (его `target` телефону не виден).
+    pub fn launch(&self, id: &str) -> anyhow::Result<()> {
+        let list = self.launch_apps();
+        let target = list.iter().find(|a| a.id == id).map(|a| a.target.clone()).ok_or_else(|| anyhow::anyhow!("приложение не найдено"))?;
+        self.platform.open(&target, "")
     }
 
     pub fn port(&self) -> u16 {
