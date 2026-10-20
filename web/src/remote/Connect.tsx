@@ -4,7 +4,7 @@ import { AuthError, loadSaved, pairAuth, parsePairUrl, type SavedPc } from '../l
 import { applyContext } from './continuity'
 import { cameraAvailable, QrScanner } from '../lib/qrscan'
 import { timeAgo } from '../lib/format'
-import { discover, isNative, type FoundPc } from './native'
+import { discover, isNative, type FoundPc, wakePc } from './native'
 import { link, servedFromPc } from './state'
 
 export function explain(e: unknown): string {
@@ -99,11 +99,20 @@ export function Connect({ error, onDone }: { error?: string | null; onDone: () =
         <section class="stack">
           <span class="label">Ваши ПК</span>
           {saved.map((p) => (
-            <button key={p.pc} type="button" class="pc-row" disabled={!!busy} onClick={() => void viaSaved(p, servedFromPc ? [location.host] : [])}>
-              <DotIcon name="desktop" size={20} />
-              <span class="grow"><b>{p.name}</b><small>{p.hosts[0]} · {timeAgo(p.at)}</small></span>
-              {busy === p.pc ? <StatusDot state="warn" live /> : <DotIcon name="right" size={14} />}
-            </button>
+            <div key={p.pc} class="pc-line">
+              <button type="button" class="pc-row" disabled={!!busy} onClick={() => void viaSaved(p, servedFromPc ? [location.host] : [])}>
+                <DotIcon name="desktop" size={20} />
+                <span class="grow"><b>{p.name}</b><small>{p.hosts[0]} · {timeAgo(p.at)}</small></span>
+                {busy === p.pc ? <StatusDot state="warn" live /> : <DotIcon name="right" size={14} />}
+              </button>
+              {isNative() && !!p.routes?.wol?.length && (
+                <button type="button" class="pc-wake" aria-label={`Включить ${p.name}`} disabled={!!busy} onClick={async () => {
+                  if (!(await wakePc(p))) { setErr('Не получилось отправить сигнал включения'); return }
+                  toast('Бужу ПК — обычно 10–40 секунд')
+                  setTimeout(() => void viaSaved(p, []), 9000)
+                }}><DotIcon name="power" size={18} /></button>
+              )}
+            </div>
           ))}
         </section>
       )}

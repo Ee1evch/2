@@ -71,6 +71,42 @@ pub fn addrs() -> Vec<Addr> {
     v.into_iter().map(|(_, a)| a).collect()
 }
 
+/// Куда слать «волшебный пакет» Wake-on-LAN: MAC сетевой карты и широковещательный адрес её сети.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Wol {
+    pub mac: String,
+    pub bcast: String,
+}
+
+/// Только настоящие сетевые карты (кабель и Wi-Fi): будить ПК умеют они, а не виртуальные адаптеры.
+pub fn wol_targets() -> Vec<Wol> {
+    let mut v: Vec<(i32, Wol)> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|i| {
+            let if_addrs::IfAddr::V4(a) = &i.addr else { return None };
+            if a.ip.is_loopback() || !is_local(IpAddr::V4(a.ip)) {
+                return None;
+            }
+            let (kind, _) = classify(&i.name, &a.ip.octets());
+            let rank = match kind {
+                "lan" => 0,
+                "wifi" => 1,
+                _ => return None,
+            };
+            let mac = mac_address::mac_address_by_name(&i.name).ok().flatten()?;
+            if mac.bytes() == [0; 6] {
+                return None;
+            }
+            let bcast = a.broadcast.map(|b| b.to_string()).unwrap_or_else(|| "255.255.255.255".into());
+            Some((rank, Wol { mac: mac.to_string(), bcast }))
+        })
+        .collect();
+    v.sort_by_key(|(r, _)| *r);
+    v.dedup_by(|a, b| a.1.mac == b.1.mac);
+    v.into_iter().map(|(_, w)| w).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

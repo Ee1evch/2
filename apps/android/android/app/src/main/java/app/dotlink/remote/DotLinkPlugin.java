@@ -357,6 +357,32 @@ public class DotLinkPlugin extends Plugin {
         }
     };
 
+    /** Wake-on-LAN: волшебный пакет на порты 9 и 7 широковещательных адресов, трижды. */
+    @PluginMethod
+    public void wake(PluginCall call) {
+        final byte[] packet = Base64.decode(call.getString("packet", ""), Base64.NO_WRAP);
+        final JSArray hosts = call.getArray("hosts", new JSArray());
+        if (packet.length != 102) { call.reject("неверный пакет"); return; }
+        io.execute(() -> {
+            int sent = 0;
+            try (DatagramSocket s = new DatagramSocket()) {
+                s.setBroadcast(true);
+                for (int round = 0; round < 3; round++) {
+                    for (int i = 0; i < hosts.length(); i++) {
+                        for (int port : new int[] { 9, 7 }) {
+                            try {
+                                s.send(new DatagramPacket(packet, packet.length, InetAddress.getByName(hosts.getString(i)), port));
+                                sent++;
+                            } catch (Exception ignored) { }
+                        }
+                    }
+                    Thread.sleep(120);
+                }
+            } catch (Exception ignored) { }
+            if (sent > 0) call.resolve(); else call.reject("сеть недоступна");
+        });
+    }
+
     /** Кнопки громкости листают слайды, пока на телефоне открыта «Указка». */
     static volatile boolean volumeKeys;
     static volatile DotLinkPlugin instance;

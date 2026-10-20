@@ -1,6 +1,7 @@
 import { render } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
-import { Chip, IconButton, TabBar, Toasts } from '../ui'
+import { Chip, DotIcon, IconButton, TabBar, Toasts, toast } from '../ui'
+import { isNative, wakePc } from './native'
 import { Palette } from './Palette'
 import { AuthError, loadSaved, pairAuth, parsePairUrl } from '../lib/link'
 import { applyContext } from './continuity'
@@ -28,7 +29,16 @@ function Status() {
   const st = link.status.value
   if (st === 'online') return <Chip state={link.rtt.value > 60 ? 'warn' : 'ok'} live>{link.rtt.value} мс</Chip>
   if (st === 'connecting') return <Chip state="warn" live>Подключение</Chip>
-  return <button type="button" class="chip" onClick={() => link.wake()}><i class="sdot err" />Нет связи · повторить</button>
+  const pc = link.savedPc
+  const canWake = isNative() && !!pc?.routes?.wol?.length
+  return (
+    <div class="row">
+      {canWake && <button type="button" class="chip" onClick={async () => {
+        if (await wakePc(pc!)) { toast('Бужу ПК — обычно 10–40 секунд'); setTimeout(() => link.wake(), 8000) } else toast('Не получилось отправить сигнал', 'err')
+      }}><DotIcon name="power" size={12} />Включить ПК</button>}
+      <button type="button" class="chip" onClick={() => link.wake()}><i class="sdot err" />Нет связи · повторить</button>
+    </div>
+  )
 }
 
 function App() {

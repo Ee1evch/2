@@ -14,13 +14,14 @@ import { authMac, Channel, ctEq, deviceKey, PairKeys, pairMac, pairTranscript } 
 import { nextJson, relayPhoneUrl, wsPipe, type Pipe, type Via } from './pipe'
 import { moveTFrame, OP, pingFrame, scrollFrame } from './proto'
 import { RtcLink, rtcSupported, type IceServer, type SessionKeys } from './rtc'
+import type { WolTarget } from './wol'
 
 export type { Via } from './pipe'
 
 export interface Perms { input: boolean; media: boolean; power: boolean; macros: boolean; clipboard: boolean; files: boolean; screen: boolean }
 
 /** Как ещё можно добраться до ПК, кроме локальной сети. */
-export interface Routes { relay?: { url: string; room: string } | null; bt?: string | null; ice?: IceServer[] }
+export interface Routes { relay?: { url: string; room: string } | null; bt?: string | null; ice?: IceServer[]; wol?: WolTarget[] }
 
 /** Сопряжённый ПК, хранится на телефоне. */
 export interface SavedPc { pc: string; name: string; device: string; key: string; hosts: string[]; port: number; at: number; routes?: Routes }
@@ -344,7 +345,8 @@ export class Link {
     if (a?.kind !== 'device' || !r) return
     const port = Number(r.port) || a.saved.port
     const lan: string[] = Array.isArray(r.lan) ? r.lan.map((ip: string) => `${ip}:${port}`) : []
-    const routes: Routes = { relay: r.relay || null, bt: typeof r.bt === 'string' ? r.bt : null, ice: Array.isArray(r.ice) ? r.ice : [] }
+    const wol: WolTarget[] = Array.isArray(r.wol) ? r.wol.filter((w: any) => typeof w?.mac === 'string') : []
+    const routes: Routes = { relay: r.relay || null, bt: typeof r.bt === 'string' ? r.bt : null, ice: Array.isArray(r.ice) ? r.ice : [], wol: wol.length ? wol : a.saved.routes?.wol }
     const hosts = [...new Set([...(this.via.value === 'lan' ? [this.host.value] : []), ...lan, ...a.saved.hosts])].slice(0, 8)
     const saved = { ...a.saved, hosts, port, routes }
     a.saved = saved
@@ -460,6 +462,9 @@ export class Link {
   }
 
   get online() { return this.status.value === 'online' && !!this.pipe }
+
+  /** Сохранённый ПК, к которому подключаемся (для Wake-on-LAN, когда он выключен). */
+  get savedPc(): SavedPc | null { return this.auth?.kind === 'device' ? this.auth.saved : null }
 
   /** Сколько байт ждёт отправки основным путём — по нему видео решает, пропускать ли кадры. */
   get backlog(): number { return this.pipe?.buffered() ?? 0 }

@@ -33,6 +33,7 @@ webrtc = "0.21"
 async-trait = "0.1"
 bytes = "1"
 jpeg-encoder = "0.6"
+mac_address = "1"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 [target.'cfg(windows)'.dependencies]

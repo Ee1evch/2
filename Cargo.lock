@@ -614,6 +614,7 @@ dependencies = [
  "hmac",
  "if-addrs",
  "jpeg-encoder",
+ "mac_address",
  "mdns-sd",
  "mime_guess",
  "parking_lot",
@@ -1194,6 +1195,16 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "mac_address"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3d0581a75c45969c63afd2bb87b1d8b25cfcc556c7a918cf9bb13b0fe8d2381"
+dependencies = [
+ "nix",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "matchers"

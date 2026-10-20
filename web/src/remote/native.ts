@@ -6,6 +6,8 @@ export interface SharedFile { uri: string; name: string; size: number; type: str
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { unb64, b64 } from '../lib/b64'
 import type { Pipe } from '../lib/pipe'
+import type { SavedPc } from '../lib/link'
+import { magicPacket } from '../lib/wol'
 
 // плагины регистрируются один раз; в браузере их вызовы недоступны — проверяем isNative()
 const PLUGINS = { DotLink: registerPlugin<any>('DotLink'), Filesystem: registerPlugin<any>('Filesystem'), Haptics: registerPlugin<any>('Haptics') }
@@ -133,6 +135,20 @@ export const mirror = {
 }
 
 /** Подписка на события нативной части; в браузере — ничего. */
+/** Разбудить выключенный ПК (Wake-on-LAN): волшебный пакет на широковещательные адреса его сетей. */
+export async function wakePc(pc: SavedPc): Promise<boolean> {
+  const p = plugin('DotLink')
+  const targets = pc.routes?.wol || []
+  if (!p || !targets.length) return false
+  let sent = false
+  for (const t of targets) {
+    const packet = magicPacket(t.mac)
+    if (!packet) continue
+    try { await p.wake({ packet: b64(packet), hosts: [t.bcast, '255.255.255.255'] }); sent = true } catch { /* сеть недоступна */ }
+  }
+  return sent
+}
+
 /** Кнопки громкости телефона листают слайды, пока открыта «Указка». */
 export async function setVolumeKeys(on: boolean): Promise<void> {
   try { await plugin('DotLink')?.setVolumeKeys({ on }) } catch { /* старая версия приложения */ }

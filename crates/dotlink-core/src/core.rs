@@ -227,7 +227,9 @@ impl Core {
         let relay = (!c.settings.relay_url.is_empty()).then(|| json!({ "url": c.settings.relay_url, "room": c.room() }));
         let lan: Vec<String> = crate::net::addrs().into_iter().map(|a| a.ip).collect();
         let bt = crate::bt::address(self);
-        self.hub.set("routes", json!({ "lan": lan, "port": self.port(), "relay": relay, "ice": c.settings.ice_servers, "bt": bt }));
+        // MAC и широковещательный адрес — чтобы телефон мог разбудить выключенный ПК
+        let wol = crate::net::wol_targets();
+        self.hub.set("routes", json!({ "lan": lan, "port": self.port(), "relay": relay, "ice": c.settings.ice_servers, "bt": bt, "wol": wol }));
     }
 
     pub fn publish_net(&self) {
