@@ -357,8 +357,31 @@ public class DotLinkPlugin extends Plugin {
         }
     };
 
+    /** Кнопки громкости листают слайды, пока на телефоне открыта «Указка». */
+    static volatile boolean volumeKeys;
+    static volatile DotLinkPlugin instance;
+
+    @PluginMethod
+    public void setVolumeKeys(PluginCall call) {
+        volumeKeys = call.getBoolean("on", false);
+        call.resolve();
+    }
+
+    /** Вызывается из MainActivity: `true` — нажатие забрали себе. */
+    static boolean onVolumeKey(boolean up, boolean down) {
+        DotLinkPlugin p = instance;
+        if (!volumeKeys || p == null) return false;
+        if (down) {
+            JSObject o = new JSObject();
+            o.put("key", up ? "up" : "down");
+            p.notifyListeners("volumeKey", o);
+        }
+        return true;
+    }
+
     @Override
     public void load() {
+        instance = this;
         MirrorService.sink = mirrorSink;
         NotifyService.sink = (app, title, text) -> {
             JSObject o = new JSObject();

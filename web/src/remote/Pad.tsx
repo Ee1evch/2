@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { DotField, DotIcon, KeyCap, haptic, type DotFieldApi } from '../ui'
+import { DotField, DotIcon, KeyCap, Segmented, haptic, type DotFieldApi } from '../ui'
+import { Pointer } from './Pointer'
 import { buttonFrame, chordFrame, keyFrame, textFrame, VK } from '../lib/proto'
 import { link, prefs } from './state'
 import { Trackpad } from './trackpad'
@@ -14,6 +15,18 @@ function MouseBtn({ b, label }: { b: 'left' | 'right'; label: string }) {
       onContextMenu={(e) => e.preventDefault()}>
       <span class="dot">{b === 'left' ? 'Л' : 'П'}</span>
     </button>
+  )
+}
+
+/** Вкладка «Тачпад»: тачпад или указка (гироскоп и слайды). */
+export function PadTab() {
+  const [mode, setMode] = useState<'pad' | 'pointer'>(() => { try { return (sessionStorage.getItem('dotlink.padMode') as 'pointer') || 'pad' } catch { return 'pad' } })
+  const pick = (m: 'pad' | 'pointer') => { setMode(m); try { sessionStorage.setItem('dotlink.padMode', m) } catch { /* приватный режим */ } }
+  return (
+    <div class="pad-tab">
+      <Segmented value={mode} onChange={pick} label="Режим" options={[{ value: 'pad', label: 'Тачпад' }, { value: 'pointer', label: 'Указка' }]} />
+      {mode === 'pad' ? <Pad /> : <Pointer />}
+    </div>
   )
 }
 

@@ -115,3 +115,23 @@ input, textarea, .clip-text { -webkit-user-select:text; user-select:text; }
 .scr-tool.on { background:var(--accent); color:var(--on-accent); box-shadow:none; }
 .scr-q { flex:1; height:48px; border-radius:var(--r-m); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); color:var(--text); font-weight:600; font-size:14px; }
 .scr-mon { color:var(--muted); font-size:13px; padding:0 4px; }
+
+/* ───────── указка ───────── */
+.pad-tab { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px; }
+.ptr-view { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px; }
+.ptr-top { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 4px 0; }
+.ptr-chip { padding:8px 16px; border-radius:999px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); color:var(--text); font-weight:600; font-size:13px; }
+.ptr-laser { position:relative; flex:1; min-height:200px; border-radius:var(--r-xl); background:var(--bg-2); box-shadow:inset 0 0 0 1px var(--border); overflow:hidden; touch-action:none; -webkit-touch-callout:none; user-select:none; transition:box-shadow .2s var(--ease); }
+.ptr-laser.on { box-shadow:inset 0 0 0 2px var(--accent); }
+.ptr-hint { position:absolute; inset:0; display:grid; place-content:center; justify-items:center; gap:6px; text-align:center; color:var(--muted); pointer-events:none; padding:0 24px; }
+.ptr-hint b { color:var(--text); font-size:16px; }
+.ptr-hint span { font-size:12.5px; }
+.ptr-laser.on .ptr-hint { color:var(--accent); }
+.ptr-slides { display:grid; grid-template-columns:1fr 1.4fr; gap:10px; height:96px; flex:none; }
+.ptr-big { display:grid; place-items:center; border-radius:var(--r-l); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); color:var(--text); transition:transform .15s var(--spring); }
+.ptr-big:active { transform:scale(.97); }
+.ptr-big.next { background:var(--accent); color:var(--on-accent); box-shadow:none; }
+.ptr-row { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; flex:none; }
+.ptr-small { display:grid; justify-items:center; gap:2px; padding:10px 6px; border-radius:var(--r-m); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); color:var(--text); font-weight:600; font-size:13.5px; }
+.ptr-small small { color:var(--muted); font-weight:500; font-size:11px; }
+.ptr-note { text-align:center; }

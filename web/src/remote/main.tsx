@@ -8,7 +8,7 @@ import './phonectl'
 import { Connect, explain } from './Connect'
 import { Files } from './Files'
 import { Home } from './Board'
-import { Pad } from './Pad'
+import { PadTab } from './Pad'
 import { Screen } from './Screen'
 import { System } from './System'
 import { link, servedFromPc } from './state'
@@ -86,7 +86,7 @@ function App() {
       <Palette open={pal} onClose={() => setPal(false)} />
       <main class="r-main">
         {tab === 'home' && <Home />}
-        {tab === 'pad' && <Pad />}
+        {tab === 'pad' && <PadTab />}
         {tab === 'screen' && <Screen />}
         {tab === 'files' && <Files />}
         {tab === 'system' && <System onSwitch={() => { link.disconnect(); setView('connect') }} />}

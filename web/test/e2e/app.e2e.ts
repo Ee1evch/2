@@ -199,6 +199,34 @@ describe('DotLink e2e', () => {
     await phone.getByRole('tab', { name: 'Пульт' }).click()
   })
 
+  it('указка: телефон ведёт курсор гироскопом, кнопки листают слайды', async () => {
+    const before = (await events()).length
+    await phone.getByRole('tab', { name: 'Тачпад' }).click()
+    await phone.getByRole('group', { name: 'Режим' }).getByRole('button', { name: 'Указка' }).click()
+    await phone.getByRole('button', { name: 'Следующий слайд' }).click()
+    await phone.getByRole('button', { name: 'Предыдущий слайд' }).click()
+    // держим указку и поворачиваем телефон влево (экраном вверх) — курсор едет влево
+    await phone.evaluate(async () => {
+      const el = document.querySelector('.ptr-laser')!
+      el.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 3, pointerType: 'touch', bubbles: true }))
+      await new Promise((r) => setTimeout(r, 30))
+      for (let i = 0; i < 40; i++) {
+        dispatchEvent(new DeviceMotionEvent('devicemotion', { rotationRate: { alpha: 40, beta: 0, gamma: 0 }, accelerationIncludingGravity: { x: 0, y: 0, z: 9.8 }, interval: 16 }))
+        await new Promise((r) => setTimeout(r, 16))
+      }
+      el.dispatchEvent(new PointerEvent('pointerup', { pointerId: 3, pointerType: 'touch', bubbles: true }))
+    })
+    const ev = await waitFor(async () => { const e = (await events()).slice(before); return e.filter((x) => x.move).length > 5 && e })
+    expect(ev.filter((e: any) => e.key === 0x27).length).toBe(1)
+    expect(ev.filter((e: any) => e.key === 0x25).length).toBe(1)
+    const dx = ev.filter((e: any) => e.move).reduce((a: number, e: any) => a + e.move[0], 0)
+    expect(dx).toBeLessThan(-300)
+    // долгое удержание с движением — не клик
+    expect(ev.some((e: any) => e.button === 'Left')).toBe(false)
+    await shot(phone, 'phone-pointer')
+    await phone.getByRole('group', { name: 'Режим' }).getByRole('button', { name: 'Тачпад' }).click()
+  })
+
   it('громкость и музыка синхронизируются с ПК', async () => {
     await phone.getByRole('tab', { name: 'Пульт' }).click()
     const slider = phone.getByRole('slider', { name: 'Громкость ПК' })

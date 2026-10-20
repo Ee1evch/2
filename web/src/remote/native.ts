@@ -133,7 +133,12 @@ export const mirror = {
 }
 
 /** Подписка на события нативной части; в браузере — ничего. */
-export function onNative(event: 'mirrorFrame' | 'mirrorState' | 'notification' | 'shared', fn: (e: any) => void): () => void {
+/** Кнопки громкости телефона листают слайды, пока открыта «Указка». */
+export async function setVolumeKeys(on: boolean): Promise<void> {
+  try { await plugin('DotLink')?.setVolumeKeys({ on }) } catch { /* старая версия приложения */ }
+}
+
+export function onNative(event: 'mirrorFrame' | 'mirrorState' | 'notification' | 'shared' | 'volumeKey', fn: (e: any) => void): () => void {
   const p = plugin('DotLink')
   if (!p?.addListener) return () => {}
   const h = p.addListener(event, fn)
