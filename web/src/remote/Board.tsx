@@ -8,6 +8,7 @@ import { handoffToPc, pushClipboard } from './continuity'
 import { MacrosCard, MediaCard, SysCards, TimerCard, useHistory, VolumeCard, WindowCard } from './Home'
 import { canReadClipboard, copyText, isNative, mirror, openSettings } from './native'
 import { caps, mirroring, ucActive } from './phonectl'
+import { ProcsCard } from './Procs'
 import { DEFAULT_WIDGETS, prefs, setPref } from './state'
 
 // ───────── виджеты, которых нет на ПК ─────────
@@ -82,6 +83,7 @@ export const WIDGETS: { id: string; label: string; icon: IconName; render: (i: n
   { id: 'phone', label: 'Телефон на ПК', icon: 'phone', render: (i) => <PhoneCard i={i} /> },
   { id: 'actions', label: 'Быстрые действия', icon: 'bolt', render: (i) => <MacrosCard i={i} limit={6} /> },
   { id: 'window', label: 'Активное окно', icon: 'window', render: (i) => <WindowCard i={i} /> },
+  { id: 'procs', label: 'Что грузит ПК', icon: 'cpu', render: (i) => <ProcsCard i={i} limit={5} /> },
 ]
 
 function Customize({ open, onClose }: { open: boolean; onClose: () => void }) {

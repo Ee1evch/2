@@ -488,6 +488,30 @@ async fn handle_frame(core: &Arc<Core>, tx: &mut Tx, ctx: &mut Ctx, f: Frame, pa
                     let idx = crate::screen::monitor(core, monitor).map_or(0, |(i, _)| i);
                     return tx.json(&json!({ "t": "screen-info", "monitors": monitors, "monitor": idx, "max": opts.max_w, "q": opts.quality })).await;
                 }
+                RemoteCmd::Procs { q } => {
+                    if !ctx.perms.power {
+                        return tx.json(&deny("power")).await;
+                    }
+                    let c = core.clone();
+                    let list = tokio::task::spawn_blocking(move || c.procs.top(40, q.as_deref())).await.unwrap_or_default();
+                    return tx.json(&json!({ "t": "procs", "list": list, "cores": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) })).await;
+                }
+                RemoteCmd::ProcKill { name } => {
+                    if !ctx.perms.power {
+                        return tx.json(&deny("power")).await;
+                    }
+                    let c = core.clone();
+                    let n = name.clone();
+                    let r = tokio::task::spawn_blocking(move || c.procs.kill(&n)).await;
+                    let reply = match r {
+                        Ok(Ok(k)) => {
+                            json!({ "t": "ok", "for": "proc-kill", "name": name, "msg": format!("«{name}» завершена{}", if k > 1 { format!(" ({k} процессов)") } else { String::new() }) })
+                        }
+                        Ok(Err(e)) => json!({ "t": "error", "for": "proc-kill", "msg": e.to_string() }),
+                        Err(_) => json!({ "t": "error", "msg": "сбой" }),
+                    };
+                    return tx.json(&reply).await;
+                }
                 RemoteCmd::ScreenAck => {
                     if let Some(s) = &ctx.screen {
                         s.ack();
@@ -766,7 +790,13 @@ fn remote_cmd(core: &Arc<Core>, cmd: RemoteCmd, device: Option<&str>, perms: &Pe
             }
         }
         RemoteCmd::UcExit => core.uc_stop(),
-        RemoteCmd::RtcOffer { .. } | RemoteCmd::RtcIce { .. } | RemoteCmd::FileGet { .. } | RemoteCmd::Screen { .. } | RemoteCmd::ScreenAck => {}
+        RemoteCmd::RtcOffer { .. }
+        | RemoteCmd::RtcIce { .. }
+        | RemoteCmd::FileGet { .. }
+        | RemoteCmd::Screen { .. }
+        | RemoteCmd::ScreenAck
+        | RemoteCmd::Procs { .. }
+        | RemoteCmd::ProcKill { .. } => {}
     }
     vec![]
 }

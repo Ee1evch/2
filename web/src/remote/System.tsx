@@ -7,6 +7,7 @@ import { TimerCard } from './Home'
 import { link, prefs, setPref } from './state'
 import { isNative, openSettings } from './native'
 import { caps, refreshCaps } from './phonectl'
+import { ProcsCard } from './Procs'
 
 const power = (a: PowerAction) => link.json({ t: 'power', a })
 
@@ -90,6 +91,7 @@ export function System({ onSwitch }: { onSwitch: () => void }) {
         </dl>
       </Card>
 
+      <ProcsCard />
       <Continuity />
 
       <Card label="Тачпад и отклик" icon="pad" span={2}>

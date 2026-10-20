@@ -140,3 +140,12 @@ input, textarea, .clip-text { -webkit-user-select:text; user-select:text; }
 .pc-line .pc-row { flex:1; min-width:0; }
 .pc-wake { display:grid; place-items:center; width:56px; border-radius:var(--r-m); background:var(--surface); box-shadow:inset 0 0 0 1px var(--border); color:var(--muted); }
 .pc-wake:active { color:var(--accent); }
+
+/* ───────── диспетчер задач ───────── */
+.proc-list { display:grid; gap:4px; }
+.proc { display:grid; grid-template-columns:1fr auto; gap:4px 10px; align-items:center; padding:8px 10px; border-radius:var(--r-s); text-align:left; color:var(--text); }
+.proc:active { background:var(--surface-2); }
+.proc .dmeter, .proc > :last-child { grid-column:1 / -1; }
+.proc-name { font-weight:600; font-size:14px; min-width:0; }
+.proc-val { color:var(--muted); font-size:13px; }
+.proc-q { height:40px; font-size:15px; }

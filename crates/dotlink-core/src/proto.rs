@@ -330,6 +330,16 @@ pub enum RemoteCmd {
         #[serde(default)]
         q: Option<u8>,
     },
+    /// программы, которые грузят ПК (диспетчер задач); `q` — найти по имени
+    Procs {
+        #[serde(default)]
+        q: Option<String>,
+    },
+    /// завершить программу (все её процессы)
+    #[serde(rename = "proc-kill")]
+    ProcKill {
+        name: String,
+    },
     /// телефон показал кадр экрана — можно слать следующий
     #[serde(rename = "screen-ack")]
     ScreenAck,

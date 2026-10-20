@@ -2,7 +2,7 @@
 // сопряжение по QR → тачпад, клавиатура, громкость, медиа → файлы → дашборд → QR-поток → отзыв устройства.
 // Запуск: npm run build && cargo build -p dotlink-server -p dotlink-relay && npm run e2e
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -225,6 +225,25 @@ describe('DotLink e2e', () => {
     expect(ev.some((e: any) => e.button === 'Left')).toBe(false)
     await shot(phone, 'phone-pointer')
     await phone.getByRole('group', { name: 'Режим' }).getByRole('button', { name: 'Тачпад' }).click()
+  })
+
+  it('что грузит ПК: живой список программ и завершение зависшей', async () => {
+    // «зависшая программа» — копия sleep под своим именем, чтобы не задеть чужие процессы
+    const name = `dlhang${process.pid}`
+    const exe = join(tmpdir(), name)
+    copyFileSync('/bin/sleep', exe); chmodSync(exe, 0o755)
+    const child = spawn(exe, ['60'], { stdio: 'ignore' })
+    const exited = new Promise<number | null>((r) => child.on('exit', (c, sig) => r(c ?? (sig ? -1 : null))))
+    await phone.getByRole('tab', { name: 'Система' }).click()
+    await phone.locator('.proc').first().waitFor({ timeout: 8000 }) // живой список программ ПК
+    await phone.getByRole('searchbox', { name: 'Найти программу' }).fill(name.slice(0, 6))
+    const row = phone.locator('.proc', { hasText: name })
+    await row.click({ timeout: 8000 })
+    await phone.getByRole('button', { name: 'Завершить' }).click()
+    expect(await Promise.race([exited, new Promise((r) => setTimeout(() => r('timeout'), 5000))])).not.toBe('timeout')
+    await phone.getByText(`«${name}» завершена`).waitFor()
+    rmSync(exe, { force: true })
+    await shot(phone, 'phone-procs')
   })
 
   it('громкость и музыка синхронизируются с ПК', async () => {

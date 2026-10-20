@@ -93,6 +93,8 @@ pub struct Core {
     notifs: Mutex<Vec<Value>>,
     /// изменения настроек — ретранслятор и Bluetooth перезапускаются сами
     pub settings_tx: watch::Sender<Settings>,
+    /// диспетчер задач: список процессов (загрузка процессора считается между запросами)
+    pub procs: crate::procs::Procs,
     /// кэш приложений меню «Пуск» для командной палитры (сканирование диска — редко)
     apps: Mutex<Option<(Instant, Arc<Vec<crate::platform::Launchable>>)>>,
 }
@@ -124,6 +126,7 @@ impl Core {
             last_clip: Mutex::new(None),
             outbox: Mutex::new(HashMap::new()),
             apps: Mutex::new(None),
+            procs: Default::default(),
         }
     }
 

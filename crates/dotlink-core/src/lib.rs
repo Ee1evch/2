@@ -10,6 +10,7 @@ pub mod motion;
 pub mod net;
 pub mod pairing;
 pub mod platform;
+pub mod procs;
 pub mod proto;
 pub mod relay;
 pub mod rtc;
